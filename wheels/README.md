@@ -67,6 +67,23 @@ native/build.py verify /tmp/wheels/markupsafe-*.whl native/markupsafe
 ```
 
 `verify` needs `target/release/eryx-precompile` (`mise run eryx-precompile`).
+Add `--sandbox` to `build` or `verify` to run it in a throwaway Docker
+container (`ubuntu:24.04` with `build-essential`) that has only the recipes,
+the toolchain and the output mounted: for building packages you haven't
+reviewed, as the agent does. A `build.sh` that needs more (e.g. `rustup`)
+installs it there.
+
+## Requests
+
+When an environment needs a package with native code we haven't built, it
+waits (`status: waiting`), and the builder counts a request for it in
+`native_package_requests` and opens a GitHub issue labelled
+`native-package` (with `ERYX_GITHUB_ISSUES_TOKEN`, a token that can write
+issues here; one issue per package version, shared by every deployment).
+Labelling the issue `build-native` runs `.github/workflows/native-agent.yml`:
+Claude writes the recipe, builds and tests it, and opens a draft PR, or says
+on the issue why it can't. Once a build is published, builders queue every
+environment waiting for it.
 
 ## Publishing
 

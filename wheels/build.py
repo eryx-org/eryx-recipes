@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build, verify and publish WASI wheels from the recipes in native/
 
-    native/build.py build RECIPE --sysroot DIR --out DIR
-    native/build.py verify WHEEL RECIPE --precompile PATH
+    native/build.py build RECIPE --sysroot DIR --out DIR [--sandbox]
+    native/build.py verify WHEEL RECIPE --precompile PATH [--sandbox]
     native/build.py publish WHEEL... --bucket NAME --endpoint URL
 
 `build` downloads the recipe's sdist (checked against its hash) into a new
@@ -14,6 +14,11 @@ its test.py there, with eryx-precompile, alongside its `test_requires`
 native wheels bucket and lists them in its index.json (with the aws CLI and
 its usual AWS_* credentials), which the builder reads (src/builder/native.rs).
 
+`--sandbox` runs a build or verify in a throwaway Docker container that has
+only the recipes, the toolchain and the output mounted, and none of this
+machine's environment, as an sdist's build code may not be trustworthy (the
+agent in native-agent.yml always uses it).
+
 Needs Python 3.12+ (tarfile's `filter`) and uv; the wheel is built with a Python 3.14
 that uv provides.
 """
@@ -23,6 +28,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -33,6 +40,11 @@ import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+# What a sandboxed build runs in; recipes that need more (e.g. rustup)
+# install it in their build.sh
+SANDBOX_IMAGE = "ubuntu:24.04"
+SANDBOX_PACKAGES = "python3 patch ca-certificates curl build-essential"
 
 
 def abi():
@@ -197,6 +209,40 @@ def publish(args):
         aws("cp", index_path, f"s3://{args.bucket}/index.json")
 
 
+def sandboxed(args):
+    """Run this build or verify again in a throwaway container, with only
+    what it needs mounted (at the same paths, read-only but for the output)
+    and none of this machine's environment, credentials or git checkout"""
+    uv = Path(shutil.which("uv") or "uv").resolve()
+    if uv.name != "uv":
+        sys.exit(f"--sandbox needs the uv binary itself on PATH, not {uv}")
+    sdk = Path(os.environ["WASI_SDK_PATH"]).resolve()
+    recipe = Path(args.recipe).resolve()
+    if (REPO / "native") not in recipe.parents:
+        sys.exit(f"{recipe} isn't a recipe in {REPO / 'native'}")
+    mounts = [(REPO / "native", "ro"), (sdk, "ro"), (uv.parent, "ro")]
+    if args.run is build:
+        out = Path(args.out).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        sysroot = Path(args.sysroot).resolve()
+        mounts += [(sysroot, "ro"), (out, "rw")]
+        inner = ["build", recipe, "--sysroot", sysroot, "--out", out]
+    else:
+        wheel, precompile = Path(args.wheel).resolve(), Path(args.precompile).resolve()
+        mounts += [(wheel, "ro"), (precompile, "ro")]
+        inner = ["verify", wheel, recipe, "--precompile", precompile]
+
+    command = ["docker", "run", "--rm", "--init", "--workdir", "/tmp",
+               "--env", f"WASI_SDK_PATH={sdk}",
+               "--env", f"PATH={uv.parent}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+    for path, mode in mounts:
+        command += ["--volume", f"{path}:{path}:{mode}"]
+    setup = (f"apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "
+             f"--no-install-recommends {SANDBOX_PACKAGES} > /dev/null")
+    script = f"{setup} && exec python3 {REPO}/native/build.py {shlex.join(map(str, inner))}"
+    run(*command, SANDBOX_IMAGE, "bash", "-c", script)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(required=True)
@@ -205,12 +251,14 @@ def main():
     command.add_argument("recipe")
     command.add_argument("--sysroot", required=True)
     command.add_argument("--out", required=True)
+    command.add_argument("--sandbox", action="store_true", help="Build in a throwaway container")
     command.set_defaults(run=build)
 
     command = commands.add_parser("verify", help="Import and test a wheel in eryx")
     command.add_argument("wheel")
     command.add_argument("recipe")
     command.add_argument("--precompile", default="target/release/eryx-precompile")
+    command.add_argument("--sandbox", action="store_true", help="Verify in a throwaway container")
     command.set_defaults(run=verify)
 
     command = commands.add_parser("publish", help="Upload wheels and list them in the index")
@@ -220,7 +268,10 @@ def main():
     command.set_defaults(run=publish)
 
     args = parser.parse_args()
-    args.run(args)
+    if getattr(args, "sandbox", False):
+        sandboxed(args)
+    else:
+        args.run(args)
 
 
 if __name__ == "__main__":
