@@ -1,0 +1,148 @@
+name: Native wheels
+
+# Builds every recipe in native/ for eryx's WASI and tests it in eryx. On
+# main, the wheels are published to the native wheels bucket, where builders
+# install them (src/builder/native.rs). Only main's runs get the bucket's
+# write key (the native-wheels environment), so a PR's recipe, which runs
+# its own build code, never sees it. Rebuilt when eryx moves, as its
+# libpython and libc are what wheels link to.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - 'eryx'
+      - 'src/builder/native.rs'
+      - '.github/workflows/native.yml'
+  # Any base, so stacked PRs build their recipes too
+  pull_request:
+    paths:
+      - 'native/**'
+      - 'eryx'
+      - 'src/builder/native.rs'
+      - '.github/workflows/native.yml'
+
+concurrency:
+  group: native-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  # Main's publishes run one at a time, each finishing, as they edit one index
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  recipes:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Just the recipes a change touches, as builds take minutes each; all
+      # of them when anything else changes (build.py, the sysroot, the
+      # workflow, eryx, the ABI), or when there's nothing to compare with
+      - id: list
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          all=$(ls native/*/recipe.toml | cut -d/ -f2)
+          if changed=$(git diff --name-only "$BASE" HEAD 2>/dev/null) &&
+             ! grep -qvE '^native/[^/]+/' <<< "$changed"; then
+            recipes=$(grep -oP '^native/\K[^/]+(?=/)' <<< "$changed" | sort -u | grep -Fxf <(echo "$all") || true)
+          else
+            recipes=$all
+          fi
+          echo "recipes=$(jq -Rc 'select(length > 0)' <<< "$recipes" | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: recipes
+    if: needs.recipes.outputs.recipes != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.recipes.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Versions
+        id: versions
+        run: |
+          echo "wasi-sdk=$(grep -oP '^wasi_sdk_version = "wasi-sdk-\K[0-9]+' eryx/mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "uv=$(grep -oP '^uv = "\K[^"]+' mise.toml)" >> "$GITHUB_OUTPUT"
+          # As ci.yml computes it, to share its eryx-precompile
+          echo "runtime=eryx-runtime-$(git rev-parse HEAD:eryx)-$({ grep -E -- '--cpu-features' mise.toml; cat runtime-imports.txt; } | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ steps.versions.outputs.uv }}
+
+      - name: Install wasi-sdk
+        env:
+          VERSION: ${{ steps.versions.outputs.wasi-sdk }}
+        run: |
+          curl -sSfL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$VERSION/wasi-sdk-$VERSION.0-x86_64-linux.tar.gz" | tar xz -C "$RUNNER_TEMP"
+          echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-$VERSION.0-x86_64-linux" >> "$GITHUB_ENV"
+
+      - name: Cache sysroot
+        id: cache-sysroot
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sysroot
+          key: native-sysroot-${{ steps.versions.outputs.wasi-sdk }}-${{ hashFiles('native/sysroot.sh', 'eryx/crates/eryx-runtime/libs/libpython3.14.so.zst') }}
+
+      - name: Build sysroot
+        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+        run: native/sysroot.sh "$RUNNER_TEMP/sysroot"
+
+      - name: Cache eryx-precompile
+        id: cache-precompile
+        uses: actions/cache@v4
+        with:
+          path: target/release/eryx-precompile
+          key: eryx-precompile-${{ hashFiles('rust-toolchain.toml', 'mise.toml') }}-${{ steps.versions.outputs.runtime }}
+
+      - name: Install mise
+        if: steps.cache-precompile.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@v2
+
+      - name: Build eryx-precompile
+        if: steps.cache-precompile.outputs.cache-hit != 'true'
+        run: mise run --skip-deps eryx-precompile
+
+      - name: Build
+        run: python3 native/build.py build "native/${{ matrix.recipe }}" --sysroot "$RUNNER_TEMP/sysroot" --out dist
+
+      - name: Test in eryx
+        run: python3 native/build.py verify dist/*.whl "native/${{ matrix.recipe }}" --precompile target/release/eryx-precompile
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.recipe }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: native-wheels
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: python3 native/build.py publish dist/*.whl
