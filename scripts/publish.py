@@ -332,6 +332,10 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool) -> list[d
         reference = f"{registry.host}/{repository}:{entry['version']}"
         component = directory / "component.wasm"
         digest = sha256_file(component)
+        # A command only goes out with its third-party notices (#4), which
+        # CI writes next to it; #6 attaches them to the manifest.
+        if not (directory / f"{name}.notices.md").is_file():
+            raise Error(f"{directory}: no {name}.notices.md, so {reference} can't be published")
 
         if registry.manifest(repository, entry["version"]) is not None:
             if fail_existing:
