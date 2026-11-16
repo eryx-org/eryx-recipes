@@ -111,7 +111,16 @@ run = "scratch/tools/bin/eryx-build --list"
 [tasks.check-clis]
 description = "Validate the command manifests without building"
 depends = ["install-eryx-build"]
-run = "scratch/tools/bin/eryx-build --check"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+# A fetched recipe must be the one its pin names, not a stale local copy.
+if [ -e clis/coreutils.toml ] && [ "$(cat scratch/fetched/coreutils_rev 2>/dev/null)" != "{{vars.coreutils_rev}}" ]; then
+    echo "clis/coreutils.toml wasn't fetched at vars.coreutils_rev; run mise run fetch-coreutils" >&2
+    exit 1
+fi
+scratch/tools/bin/eryx-build --check
+"""
 
 [tasks.check-wit]
 description = "Check wit/process.wit matches eryx's at vars.eryx_rev"
@@ -146,10 +155,13 @@ for f in clis/coreutils.toml clis/patches/patch-uucore-wasip2.sh; do
     curl -fsSL -o "$f" "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.coreutils_rev}}/$f"
 done
 chmod +x clis/patches/patch-uucore-wasip2.sh
+# The pin it was fetched at, which check-clis and check-versions compare.
+mkdir -p scratch/fetched
+echo "{{vars.coreutils_rev}}" > scratch/fetched/coreutils_rev
 """
 
 [tasks.bump-coreutils]
-description = "Move vars.coreutils_rev to the newest eryx commit that changed coreutils' recipe, and bump its version. Usage: mise run bump-coreutils [-- BRANCH] (default multi-guest)"
+description = "Move vars.coreutils_rev to the newest eryx commit that changed coreutils' recipe, and bump its version. Usage: mise run bump-coreutils [-- BRANCH] (default multi-guest). A new upstream version also needs third_party/manual.toml's uutils entry (version, url, cli_commit) and its licence file updated by hand; notices-check fails until then"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail

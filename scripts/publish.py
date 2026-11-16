@@ -229,6 +229,15 @@ def check_versions(root: Path, base: str | None) -> list[str]:
             hint = f" (run `mise run fetch-{key[1]}`)" if "fetched" in entry else ""
             problems.append(f"{label}: its manifest {rel} doesn't exist{hint}")
             continue
+        if "fetched" in entry:
+            stamp = root / "scratch" / "fetched" / entry["fetched"]
+            fetched = stamp.read_text().strip() if stamp.exists() else None
+            if fetched != mise["vars"][entry["fetched"]]:
+                problems.append(
+                    f"{label}: {rel} was fetched at {fetched or 'an unknown commit'}, not "
+                    f"vars.{entry['fetched']}; run `mise run fetch-{key[1]}`"
+                )
+                continue
         manifest = tomllib.loads((root / rel).read_text())
         if entry.get("multicall"):
             try:
@@ -637,6 +646,9 @@ def bump(root: Path, name: str, branch: str) -> None:
         mise_text, rf'^{re.escape(var)} = "[0-9a-f]+"', f'{var} = "{rev}"', f"vars.{var} in mise.toml"))
     (root / COMMANDS).write_text(set_version((root / COMMANDS).read_text(), key, version))
     print(f"{name}: {current[:12]} -> {rev[:12]}, {entry['version']} -> {version}", file=sys.stderr)
+    if version.endswith("-r.1"):
+        print(f"{name}: a new upstream version: update its third_party/manual.toml entry "
+              "(version, url, cli_commit) and licence file by hand", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

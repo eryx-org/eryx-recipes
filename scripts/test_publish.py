@@ -341,11 +341,12 @@ class CheckVersions(unittest.TestCase):
 
     def test_moving_a_fetched_recipes_pin_needs_a_new_revision(self):
         # The fetched recipe is git-ignored, so only the pin shows the change.
-        self.write(".gitignore", "/clis/coreutils.toml\n")
+        self.write(".gitignore", "/clis/coreutils.toml\nscratch/\n")
         self.write("clis/coreutils.toml", 'name = "coreutils"\nlicense = "MIT"\nlang = "rust"\n'
                    '[source]\nref = "0.9.0"\n[build]\ncargo_flags = ["--features", "cat"]\n')
         mise = (self.MISE % "aaa").replace("wasi_sdk_version", 'coreutils_rev = "c1", wasi_sdk_version')
         self.write("mise.toml", mise)
+        self.write("scratch/fetched/coreutils_rev", "c1\n")
         text = (self.root / "commands.toml").read_text()
         self.write("commands.toml", text + '[eryx.coreutils]\nversion = "0.9.0-r.1"\n'
                    'multicall = true\nfetched = "coreutils_rev"\n')
@@ -355,8 +356,13 @@ class CheckVersions(unittest.TestCase):
 
         self.write("mise.toml", mise.replace('"c1"', '"c2"'))
         self.commit()
+        # The local copy is still c1's.
+        [problem] = self.problems()
+        self.assertIn("mise run fetch-coreutils", problem)
+        self.write("scratch/fetched/coreutils_rev", "c2\n")
         [problem] = self.problems()
         self.assertIn("eryx:coreutils", problem)
+        self.assertIn("needs a new revision", problem)
         self.set_version("coreutils", "0.9.0-r.2")
         self.commit()
         self.assertEqual(self.problems(), [])
