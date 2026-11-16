@@ -98,6 +98,10 @@ def provenance_predicate(result: dict, provenance: dict, revision: str, env: dic
     elif source.get("sha256"):
         upstream["digest"] = {"sha256": source["sha256"]}
     run_id = env.get("GITHUB_RUN_ID")
+    attempt = f"/attempts/{env.get('GITHUB_RUN_ATTEMPT', '1')}"
+    # Signing an earlier run's publish (ci.yml's sign_run_id): that run built it.
+    if env.get("ERYX_BUILD_RUN_ID"):
+        run_id, attempt = env["ERYX_BUILD_RUN_ID"], ""
     return {
         "buildDefinition": {
             "buildType": BUILD_TYPE,
@@ -129,8 +133,7 @@ def provenance_predicate(result: dict, provenance: dict, revision: str, env: dic
             "builder": {"id": f"{server}/{workflow_ref}"},
             "metadata": {
                 "invocationId": (
-                    f"{server}/{repository}/actions/runs/{run_id}/attempts/"
-                    f"{env.get('GITHUB_RUN_ATTEMPT', '1')}"
+                    f"{server}/{repository}/actions/runs/{run_id}{attempt}"
                     if run_id else "local"
                 ),
             },

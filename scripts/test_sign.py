@@ -48,6 +48,9 @@ class Sign(unittest.TestCase):
         self.assertEqual(p["buildDefinition"]["externalParameters"]["workflow"],
                          {"ref": "refs/heads/main", "path": ".github/workflows/ci.yml",
                           "repository": "https://github.com/eryx-org/eryx-commands"})
+        earlier = sign.provenance_predicate(RESULT, PROVENANCE, "1234", {**ENV, "ERYX_BUILD_RUN_ID": "7"})
+        self.assertEqual(earlier["runDetails"]["metadata"]["invocationId"],
+                         "https://github.com/eryx-org/eryx-commands/actions/runs/7")
         deps = p["buildDefinition"]["resolvedDependencies"]
         self.assertEqual([d["digest"] for d in deps],
                          [{"gitCommit": "1234"}, {"gitCommit": "c0ffee"}, {"sha256": "d" * 64}])
