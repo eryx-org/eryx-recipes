@@ -18,7 +18,8 @@
 #   wasi_sdk  - code from the WASI SDK: the version, which must be
 #               mise.toml's wasi_sdk_version
 #   go_fork_commit - code from the wasip3 Go fork: the commit, which must be
-#               the one scripts/bootstrap-go-wasip3.sh builds
+#               the one scripts/bootstrap-go-wasip3.sh builds; the version
+#               must start with that script's GO_WASIP3_REF
 
 # ---------------------------------------------------------------------------
 # The commands and their [[deps]]

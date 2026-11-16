@@ -75,7 +75,8 @@ GO_BOOTSTRAP = ROOT / "scripts" / "bootstrap-go-wasip3.sh"
 # The target every Rust command is built for (eryx-build's Rust lane).
 RUST_TARGET = "wasm32-wasip2"
 
-LICENCE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|UNLICENSE|NOTICE|COPYRIGHT)", re.I)
+# Source files named like licences (go-openapi/spec's license.go) are code, not licence text.
+LICENCE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|UNLICENSE|NOTICE|COPYRIGHT)(?!.*\.(go|rs|c|h|py|js|s)$)", re.I)
 
 
 def stable_toolchain():
@@ -361,9 +362,13 @@ def manual_section(artifact):
     return "\n".join(out)
 
 
-def go_fork_commit():
-    match = re.search(r'^GO_WASIP3_COMMIT="([0-9a-f]+)"', GO_BOOTSTRAP.read_text(), re.M)
+def go_bootstrap_var(name):
+    match = re.search(rf'^{name}="([^"]+)"', GO_BOOTSTRAP.read_text(), re.M)
     return match[1] if match else None
+
+
+def go_fork_commit():
+    return go_bootstrap_var("GO_WASIP3_COMMIT")
 
 
 def escape_module(module):
@@ -552,6 +557,8 @@ def check_manual():
                         errors.append(f"{c['name']}: {c['rust_toolchain']}'s {rel} doesn't contain {string!r}; update the entry")
         if "go_fork_commit" in c and c["go_fork_commit"] != go_fork_commit():
             errors.append(f"{c['name']}: scripts/bootstrap-go-wasip3.sh builds {go_fork_commit()}, not {c['go_fork_commit']}; update the entry")
+        if "go_fork_commit" in c and not c["version"].startswith(f"{go_bootstrap_var('GO_WASIP3_REF')} "):
+            errors.append(f"{c['name']}: scripts/bootstrap-go-wasip3.sh builds {go_bootstrap_var('GO_WASIP3_REF')}, not {c['version']}; update the entry")
         if "wasi_sdk" in c and c["wasi_sdk"] != mise["vars"]["wasi_sdk_version"]:
             errors.append(f"{c['name']}: mise.toml pins {mise['vars']['wasi_sdk_version']}, not {c['wasi_sdk']}; update the entry")
 
