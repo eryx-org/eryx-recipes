@@ -1,5 +1,6 @@
 """Tests for sign.py: `python3 -m unittest discover -s scripts`."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,21 +53,31 @@ class Sign(unittest.TestCase):
                          [{"gitCommit": "1234"}, {"gitCommit": "c0ffee"}, {"sha256": "d" * 64}])
         self.assertEqual(p["runDetails"]["byproducts"][0]["digest"], {"sha256": "a" * 64})
 
-    def test_source_offer(self):
-        offer = sign.source_offer(RESULT, PROVENANCE, "1234", "clis/gpl/git")
-        self.assertEqual(offer["source"], {"repository": sign.SOURCE_URL, "commit": "1234",
-                                           "recipe": "clis/gpl/git"})
-        self.assertEqual(offer["upstream"]["commit"], "c0ffee")
-
-    def test_recipe_tarball_is_reproducible(self):
+    def test_source_inputs_are_read_from_the_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "patches").mkdir()
-            (root / "git.toml").write_text("x")
-            (root / "patches" / "0001.patch").write_text("y")
-            first = sign.recipe_tarball(root, "git-recipe")
-            (root / "git.toml").touch()
-            self.assertEqual(first, sign.recipe_tarball(root, "git-recipe"))
+            inputs = sign.source_inputs(("eryx-gpl", "git"), "HEAD", Path(tmp))
+        self.assertEqual(inputs["recipe"], "clis/gpl/git/git.toml")
+        for path in ["clis/gpl/git/git.toml", "clis/gpl/git/patches/git-wasi.patch",
+                     "clis/gpl/git/shims/wasi-git-stubs.c", "wit/process.wit"]:
+            self.assertIn(path, inputs["files"])
+        self.assertIn("vars.eryx_rev", inputs["pins"])
+        self.assertIn("vars.wasi_sdk_version", inputs["pins"])
+        self.assertEqual(inputs["manifest"]["deps"][0]["name"], "zlib")
+
+    def test_a_layer_this_run_didnt_build_is_not_signed(self):
+        class NoTools:
+            def __getattr__(self, name):
+                raise AssertionError(f"called {name}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            component = Path(tmp) / "git-component"
+            component.mkdir()
+            (component / "component.wasm").write_bytes(b"this run's build")
+            (component / "provenance.json").write_text(json.dumps(PROVENANCE))
+            already = {**RESULT, "pushed": False}
+            skipped = sign.sign_all([already], [component], NoTools(), ENV, Path(tmp))
+        self.assertEqual(len(skipped), 1)
+        self.assertIn("wasn't signed", skipped[0])
 
 
 if __name__ == "__main__":

@@ -11,11 +11,16 @@ manifest digest:
 - attest its SLSA provenance (`cosign attest --type slsaprovenance1`);
 - attach its notices (`<name>.notices.md`, from its COMPONENT_DIR) as an OCI
   referrer of type `application/vnd.eryx.notices.v1+markdown`;
-- for a GPL command (namespace `eryx-gpl`), attach a source offer of type
-  `application/vnd.eryx.source-offer.v1+json`: where its corresponding
-  source is (this repo at the published commit, and the upstream commit),
-  with this repo's recipe directory for it (manifest, patches, shims,
-  NOTICE) as a tarball layer.
+- for a GPL command (namespace `eryx-gpl`), attach its complete
+  corresponding source as a referrer of type
+  `application/vnd.eryx.source-offer.v1+json` (see source_offer), so it sits
+  next to the binary, in the same place (GPLv2 section 3's "equivalent
+  access").
+
+A command is only signed when its layer is this run's component.wasm: a
+version that was already in the registry with a different layer (a re-run
+that rebuilt it) is skipped and reported, since signing it would vouch for
+a build this run didn't make.
 
 Each step is skipped when the registry already has it (a signature or
 attestation that verifies, a referrer of the type), so a re-run after a
@@ -35,7 +40,7 @@ Only the standard library is used, plus the cosign and oras binaries.
 from __future__ import annotations
 
 import argparse
-import gzip
+import hashlib
 import io
 import json
 import os
@@ -43,7 +48,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
+import urllib.request
 from pathlib import Path
+
+import publish
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,7 +64,8 @@ ISSUER = "https://token.actions.githubusercontent.com"
 
 NOTICES_TYPE = "application/vnd.eryx.notices.v1+markdown"
 SOURCE_OFFER_TYPE = "application/vnd.eryx.source-offer.v1+json"
-PATCHES_MEDIA_TYPE = "application/vnd.eryx.source-offer.recipe.v1.tar+gzip"
+RECIPE_MEDIA_TYPE = "application/vnd.eryx.source-offer.recipe.v1.tar+gzip"
+UPSTREAM_MEDIA_TYPE = "application/vnd.eryx.source-offer.upstream.v1.tar+gzip"
 # GitHub Actions' SLSA build type: what the workflow's parameters mean.
 BUILD_TYPE = "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1"
 GPL_NAMESPACE = "eryx-gpl"
@@ -129,35 +139,116 @@ def provenance_predicate(result: dict, provenance: dict, revision: str, env: dic
     }
 
 
-def source_offer(result: dict, provenance: dict, revision: str, recipe: str) -> dict:
-    """Where a GPL command's corresponding source is: this repo at the
-    commit it was published from (its recipe directory, which the offer's
-    layer also carries), and the upstream source and patches it was built
-    from."""
+def git(*args: str, cwd: Path = ROOT) -> bytes:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, stdout=subprocess.PIPE).stdout
+
+
+def sha256_file(path: Path) -> str:
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def source_inputs(key: tuple[str, str], revision: str, workdir: Path) -> dict:
+    """What command `key` was built from at `revision` of this repo: its
+    recipe's build inputs (publish.build_inputs: the manifest, its patches,
+    shims and WIT, its lane's files) and its lane's mise.toml pins, read from
+    that commit, not the working tree."""
+    tree = workdir / f"{key[1]}-tree-{revision}"
+    tree.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", revision))) as tar:
+        tar.extractall(tree, filter="data")
+    entry = publish.load_commands((tree / publish.COMMANDS).read_text())[key]
+    rel = publish.manifest_path(key, entry)
+    manifest = tomllib.loads((tree / rel).read_text())
+    mise = tomllib.loads((tree / "mise.toml").read_text())
+    paths, pins = publish.build_inputs(tree, rel, manifest)
     return {
-        "command": result["name"],
-        "version": result["version"],
-        "license": provenance["license"],
-        "source": {"repository": SOURCE_URL, "commit": revision, "recipe": recipe},
-        "upstream": provenance["source"],
-        "patches": provenance.get("patches", []),
-        "notice": f"{recipe}/NOTICE.md",
+        "recipe": rel,
+        "files": paths,
+        "pins": {f"{table}.{name}": value
+                 for (table, name), value in zip(pins, publish.pin_values(mise, pins))},
+        "manifest": manifest,
     }
 
 
-def recipe_tarball(directory: Path, arcname: str) -> bytes:
-    """`directory` as a reproducible .tar.gz: sorted, no owners, no times."""
-    buffer = io.BytesIO()
-    with gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0) as gz:
-        with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tar:
-            for path in sorted(p for p in directory.rglob("*") if p.is_file()):
-                info = tarfile.TarInfo(f"{arcname}/{path.relative_to(directory).as_posix()}")
-                data = path.read_bytes()
-                info.size = len(data)
-                info.mode = 0o755 if os.access(path, os.X_OK) else 0o644
-                info.mtime = 0
-                tar.addfile(info, io.BytesIO(data))
-    return buffer.getvalue()
+def fetch_upstream(source: dict, prefix: str, out: Path) -> dict:
+    """An upstream source as a .tar.gz at `out`: a git repo's tree at its
+    pinned commit (`git archive`), or an archive checked against its pinned
+    sha256. Returns where it came from."""
+    if source.get("commit"):
+        repo = out.parent / f"{prefix}.git"
+        git("init", "-q", "--bare", str(repo))
+        git("fetch", "-q", "--depth", "1", source["repo"], source["commit"], cwd=repo)
+        git("archive", "--format=tar.gz", f"--prefix={prefix}/", "-o", str(out), source["commit"],
+            cwd=repo)
+        return {"repo": source["repo"], "ref": source.get("ref"), "commit": source["commit"]}
+    url, sha256 = source.get("url") or source.get("repo"), source.get("sha256")
+    if not (url and sha256):
+        raise Error(f"{prefix}: pinned by neither commit nor url and sha256: {source}")
+    with urllib.request.urlopen(url) as response, out.open("wb") as f:
+        while chunk := response.read(1 << 20):
+            f.write(chunk)
+    if sha256_file(out) != sha256:
+        raise Error(f"{url}: sha256 {sha256_file(out)}, not the pinned {sha256}")
+    return {"url": url, "ref": source.get("ref"), "sha256": sha256}
+
+
+def source_offer(result: dict, provenance: dict, revision: str, workdir: Path
+                 ) -> tuple[Path, list[tuple[Path, str]]]:
+    """A GPL command's complete corresponding source, as the source offer's
+    config and layers:
+
+    - `<name>-recipe.tar.gz`: every build input from this repo at `revision`
+      (`git archive`), with BUILD-INPUTS.json: the upstream source and
+      [[deps]] pins, the lane's tool pins (eryx_rev, the WASI SDK, ...),
+      eryx-build's version, and the patches with their digests;
+    - one `.tar.gz` per upstream source: the tool's own at its pinned
+      commit, and each statically linked [[deps]], fetched at its pin.
+
+    The config (source-offer.json) lists all of it, so the referrer is
+    enough on its own: it doesn't rely on this repo, or upstream's hosting,
+    staying reachable."""
+    namespace, name = result["name"].split(":", 1)
+    inputs = source_inputs((namespace, name), revision, workdir)
+    manifest = inputs.pop("manifest")
+    offer_dir = workdir / f"{name}-source-offer"
+    offer_dir.mkdir()
+
+    upstreams = [(f"{name}-{manifest['source']['ref']}", manifest["source"])]
+    upstreams += [(f"{d['name']}-{d['ref']}", d) for d in manifest.get("deps", [])]
+    layers, upstream = [], []
+    for prefix, source in upstreams:
+        archive = offer_dir / f"{prefix}.tar.gz"
+        upstream.append({"file": archive.name, **fetch_upstream(source, prefix, archive),
+                         "license": source.get("license", manifest["license"]),
+                         "sha256_of_file": sha256_file(archive)})
+        layers.append((archive, UPSTREAM_MEDIA_TYPE))
+
+    build_inputs = {
+        "command": result["name"],
+        "version": result["version"],
+        "license": provenance["license"],
+        "repository": SOURCE_URL,
+        "commit": revision,
+        **inputs,
+        "eryx_build": provenance.get("eryx_build"),
+        "upstream": upstream,
+        "patches": provenance.get("patches", []),
+    }
+    recipe = offer_dir / f"{name}-recipe.tar.gz"
+    git("archive", "--format=tar.gz", f"--prefix={name}-recipe/",
+        # A virtual file's path doesn't take the prefix.
+        f"--add-virtual-file={name}-recipe/BUILD-INPUTS.json:{json.dumps(build_inputs, indent=2)}\n",
+        "-o", str(recipe), revision, "--", *inputs["files"])
+    layers.insert(0, (recipe, RECIPE_MEDIA_TYPE))
+
+    offer = offer_dir / "source-offer.json"
+    offer.write_text(json.dumps({
+        **build_inputs,
+        "recipe_archive": {"file": recipe.name, "sha256_of_file": sha256_file(recipe)},
+        "notice": f"{inputs['recipe'].rsplit('/', 1)[0]}/NOTICE.md",
+    }, indent=2) + "\n")
+    return offer, layers
 
 
 class Tools:
@@ -239,7 +330,9 @@ class Tools:
 
 
 def sign_all(results: list[dict], dirs: list[Path], tools: Tools, env: dict,
-             workdir: Path) -> None:
+             workdir: Path) -> list[str]:
+    """Sign and attach each result; returns the ones skipped, as messages."""
+    skipped = []
     components = {}
     for directory in dirs:
         provenance = json.loads((directory / "provenance.json").read_text())
@@ -250,6 +343,15 @@ def sign_all(results: list[dict], dirs: list[Path], tools: Tools, env: dict,
             raise Error(f"{result['name']}: no component dir among {[str(d) for d in dirs]}")
         directory, provenance = components[name]
         ref = by_digest(result)
+        built = "sha256:" + sha256_file(directory / "component.wasm")
+        if result["layer_digest"] != built:
+            # Already published (`pushed: false`) from another build: this
+            # run's notices, SBOM and provenance don't describe it either.
+            skipped.append(f"{result['name']} {result['version']} ({ref}): its layer is "
+                           f"{result['layer_digest']}, but this run built {built}, so it "
+                           "wasn't signed. Re-run the failed jobs of the run that published "
+                           "it (they reuse its build), or publish a new version.")
+            continue
         # The commit the command was published from, which may be an
         # earlier run's when this one signs what that run pushed.
         annotations = tools.manifest(ref).get("annotations", {})
@@ -282,16 +384,9 @@ def sign_all(results: list[dict], dirs: list[Path], tools: Tools, env: dict,
             if tools.referrers(ref, SOURCE_OFFER_TYPE):
                 print(f"{ref}: source offer already attached", file=sys.stderr)
                 continue
-            recipe = f"clis/gpl/{name}"
-            offer_dir = workdir / f"{name}-source-offer"
-            offer_dir.mkdir(exist_ok=True)
-            offer = offer_dir / "source-offer.json"
-            offer.write_text(json.dumps(
-                source_offer(result, provenance, revision, recipe), indent=2) + "\n")
-            tarball = offer_dir / f"{name}-recipe.tar.gz"
-            tarball.write_bytes(recipe_tarball(ROOT / recipe, f"{name}-recipe"))
-            tools.attach(ref, SOURCE_OFFER_TYPE, [(tarball, PATCHES_MEDIA_TYPE)],
-                         config=(offer, SOURCE_OFFER_TYPE))
+            offer, layers = source_offer(result, provenance, revision, workdir)
+            tools.attach(ref, SOURCE_OFFER_TYPE, layers, config=(offer, SOURCE_OFFER_TYPE))
+    return skipped
 
 
 def main() -> int:
@@ -318,11 +413,16 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             tools = Tools(args.insecure, args.key, args.pub, args.tlog, workdir)
-            sign_all(results, args.dirs, tools, dict(os.environ), workdir)
-        return 0
+            skipped = sign_all(results, args.dirs, tools, dict(os.environ), workdir)
     except (Error, subprocess.CalledProcessError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    for message in skipped:
+        print(f"::warning title=Not signed::{message}")
+    if skipped and (summary := os.environ.get("GITHUB_STEP_SUMMARY")):
+        with open(summary, "a") as f:
+            f.write("## Not signed\n\n" + "".join(f"- {m}\n" for m in skipped))
+    return 0
 
 
 if __name__ == "__main__":
