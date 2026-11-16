@@ -13,8 +13,8 @@
 # provenance.json. Then every run publishes what it built (#5):
 # - to a throwaway registry on the runner, always (the dry run): the push is
 #   read back and checked, and the would-be commands.lock is uploaded;
-# - to ghcr.io/eryx-org/commands, only from a manual run with `publish` set,
-#   after the dry run passes and the ghcr-publish environment approves.
+# - to ghcr.io/eryx-org/commands, only from Ben's manual run on main with
+#   `publish` set, after the dry run passes (see the publish job).
 
 name: CI
 
