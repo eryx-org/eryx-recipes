@@ -1,0 +1,36 @@
+# Allowlist: everything is ignored unless unignored below. Add a path here
+# when it should be committed.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE-MIT
+!/LICENSE-APACHE
+!/mise.toml
+!/.github/
+!/clis/
+!/scripts/
+!/third_party/
+
+# Never committed, even inside the directories above: build checkouts and
+# outputs, secrets and credentials, and agent session logs.
+scratch/
+target/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+.netrc
+.npmrc
+.pypirc
+.envrc
+.docker/
+credentials*
+*service-account*.json
+.claude/
+*.jsonl

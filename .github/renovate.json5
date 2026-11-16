@@ -1,0 +1,50 @@
+// Adapted from eryx's .github/renovate.json5.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    // Pin actions to commit SHAs with a `# vX.Y.Z` comment, and keep both
+    // current. Mutable tags can be moved by whoever controls the upstream repo.
+    "helpers:pinGitHubActionDigests",
+    ":dependencyDashboard",
+    ":semanticCommitTypeAll(build)",
+  ],
+  semanticCommitScope: "deps",
+  labels: ["dependencies"],
+  prConcurrentLimit: 10,
+  prHourlyLimit: 4,
+
+  packageRules: [
+    // Roll all GitHub Actions bumps into one PR.
+    {
+      matchManagers: ["github-actions"],
+      groupName: "github-actions",
+    },
+    // The mise version pinned in workflows releases near-daily; batch it
+    // into one weekly PR.
+    {
+      matchDepNames: ["jdx/mise"],
+      groupName: "mise",
+      schedule: ["before 6am on monday"],
+    },
+    // The Rust toolchain moves with eryx's, deliberately. matchDepNames, not
+    // matchPackageNames: the mise manager resolves `rust` to packageName
+    // "rust-lang/rust".
+    {
+      groupName: "Rust toolchain",
+      matchManagers: ["mise"],
+      matchDepNames: ["rust"],
+    },
+    // wasmtime (the smoke tests' runtime) and wit-bindgen (the C recipes'
+    // bindings) track eryx's versions, so the WASI and WIT versions the
+    // commands are built and tested against match the host that runs them.
+    // They're grouped and wait for approval on the dashboard, to be bumped
+    // together with eryx.
+    {
+      matchManagers: ["mise"],
+      matchDepNames: ["aqua:bytecodealliance/wasmtime", "github:bytecodealliance/wit-bindgen"],
+      groupName: "wasmtime & wit-bindgen (align with eryx)",
+      dependencyDashboardApproval: true,
+    },
+  ],
+}
