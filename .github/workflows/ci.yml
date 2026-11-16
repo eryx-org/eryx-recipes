@@ -370,12 +370,14 @@ jobs:
   # (org.opencontainers.image.source).
   #
   # The actor check is the approval: required reviewers on an environment
-  # need a paid plan for a private repo. Move this to an environment with
-  # reviewers once the repo is public.
+  # need a paid plan for a private repo. triggering_actor covers re-runs of
+  # Ben's run by someone else. It only holds while sd2k is the only one with
+  # write access, since anyone who can push can change this workflow. Move
+  # this to an environment with reviewers once the repo is public.
   publish:
     name: Publish to ghcr.io
     needs: publish-dry-run
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' && github.actor == 'sd2k' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' && github.actor == 'sd2k' && github.triggering_actor == 'sd2k' }}
     runs-on: ubuntu-latest
     # One publish at a time, never cancelled: the check that a version isn't
     # in the registry yet is only good while nothing else is pushing.
@@ -425,6 +427,8 @@ jobs:
             scratch/results.json
             commands.lock
           retention-days: 90
+          # A re-run of this job uploads again under the same name.
+          overwrite: true
 
   # Record the versions in commands.lock through a PR, so the index changes
   # are reviewed like any other. Results include versions that were already

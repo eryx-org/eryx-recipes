@@ -34,7 +34,8 @@ Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its n
   `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR. A version may never be lower than one `commands.lock` already has. Versions are `MAJOR.MINOR.PATCH-r.<n>`, as wkg needs semver.
 - **Dry run:** every CI run publishes what it built to a throwaway registry on the runner. It reads each push back, checks the layer against `component.wasm`, and uploads the would-be `commands.lock`.
 - **Real publish:** Ben runs the CI workflow by hand on `main` with `publish` set; the job only runs for that actor. After the dry run, it pushes every built command whose version isn't in the registry yet to `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>`. Then it opens a PR that adds them to `commands.lock`.
-  - On a private repo, a required reviewer on an environment needs a paid plan, so the actor check stands in for one until the repo is public.
+  - On a private repo, a required reviewer on an environment needs a paid plan, so the actor check stands in for one until the repo is public. It also checks who triggered a re-run.
+  - **The gate only holds while sd2k is the only user with write access,** because anyone who can push can change the workflow.
 - **Versions are never replaced, by our own rules.** ghcr doesn't stop a tag being pushed again. publish.py checks each tag first and never pushes one that exists, and real publishes run one at a time (a concurrency group that's never cancelled), so nothing races that check.
   - A version that's already there is listed in the results with the registry's digests, so `lock` and signing pick it up. A re-run after a failure part way records and signs everything.
   - `--fail-existing`, which the dry run uses, makes an existing version an error.

@@ -225,6 +225,15 @@ def check_versions(root: Path, base: str | None) -> list[str]:
         old = base_commands.get(key)
         if not old:
             continue
+        # A new version must be new to the registry, or publish would skip it
+        # as already there: going back to a published version isn't one.
+        if old["version"] != entry["version"] and published and (
+            version_key(entry["version"]) <= version_key(published[-1])
+        ):
+            problems.append(
+                f"{label}: version {entry['version']} must be higher than the published "
+                f"{published[-1]}"
+            )
         old_upstream, _ = parse_version(old["version"])
         if old_upstream != upstream and revision != 1:
             problems.append(f"{label}: a new upstream version starts at r.1, not r.{revision}")

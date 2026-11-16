@@ -292,6 +292,23 @@ class CheckVersions(unittest.TestCase):
         self.set_version("sd", "1.1.0-r.3")
         self.assertEqual(publish.check_versions(self.root, None), [])
 
+    def test_a_changed_version_must_be_new_to_the_registry(self):
+        self.write("commands.lock", publish.write_lock(
+            {"eryx:sd": {"1.1.0-r.1": "sha256:a", "1.1.0-r.2": "sha256:b"}}
+        ))
+        self.set_version("sd", "1.1.0-r.2")
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD").strip()
+        # Back to r.1, which is published: publish would skip it.
+        self.write("clis/patches/patch-sd.sh", "echo 2\n")
+        self.set_version("sd", "1.1.0-r.1")
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("must be higher than the published 1.1.0-r.2", problem)
+        self.set_version("sd", "1.1.0-r.3")
+        self.commit()
+        self.assertEqual(self.problems(), [])
+
     def test_versions_must_match_the_manifest_and_cover_every_recipe(self):
         self.set_version("curl", "8.21.0-r.1")
         self.write("clis/gpl/git/git.toml", 'name = "git"\nlicense = "GPL-2.0-only"\nlang = "c"\n[source]\nref = "v2.56.1"\n')
