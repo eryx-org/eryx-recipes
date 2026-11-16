@@ -99,3 +99,17 @@ curl -fsSL "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.eryx_rev}}/cr
     | diff - <(tail -n +4 wit/process.wit) \
     || { echo "wit/process.wit differs from eryx's at {{vars.eryx_rev}}; re-vendor it" >&2; exit 1; }
 """
+
+[tasks.ensure-rust-src]
+description = "Install rust-src and the wasm32-wasip2 target, which the notices read the standard library and its wasi-libc from"
+run = "rustup component add rust-src && rustup target add wasm32-wasip2"
+
+[tasks.notices]
+description = "Write built commands' notices. Usage: mise run notices -- OUTDIR NAME..."
+depends = ["ensure-rust-src"]
+run = "python3 scripts/notices.py generate"
+
+[tasks.notices-check]
+description = "Check every published command, its [[deps]] and its lane's libraries have current notice entries"
+depends = ["ensure-rust-src"]
+run = "python3 scripts/notices.py check"
