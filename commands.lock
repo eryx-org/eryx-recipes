@@ -1,3 +1,75 @@
 # Every published command version and its layer digest, in wkg.lock's
 # format. Written by `scripts/publish.py lock`; don't edit by hand.
 version = 1
+
+[[packages]]
+name = "eryx-gpl:git"
+
+[[packages.versions]]
+requirement = "=2.56.1-r.1"
+version = "2.56.1-r.1"
+digest = "sha256:56e60debd7283d42f22bf4bc99ccccdb9e8ccc3649988f692ce59fd1ff7bdfa8"
+
+[[packages]]
+name = "eryx:coreutils"
+
+[[packages.versions]]
+requirement = "=0.9.0-r.1"
+version = "0.9.0-r.1"
+digest = "sha256:68b00fbd44f3e771dd94355afc5f04b82b607afd039dfe8e8bc9049cea0a9526"
+
+[[packages]]
+name = "eryx:curl"
+
+[[packages.versions]]
+requirement = "=8.20.0-r.1"
+version = "8.20.0-r.1"
+digest = "sha256:f4b178d80f801ccaafc83049bc0295aeb0be854c071bd7dcdbc97ce78e9fa701"
+
+[[packages]]
+name = "eryx:gh"
+
+[[packages.versions]]
+requirement = "=2.87.3-r.1"
+version = "2.87.3-r.1"
+digest = "sha256:71f6649a1602c47903e40ab243812a685097c7900eba601e1d4fc8b748bc27c9"
+
+[[packages]]
+name = "eryx:jaq"
+
+[[packages.versions]]
+requirement = "=3.1.2-r.1"
+version = "3.1.2-r.1"
+digest = "sha256:dccff78f88c650578aca2d9c77bf2773d29bbf41aec225cdcb6afcccb90fc77d"
+
+[[packages]]
+name = "eryx:jq"
+
+[[packages.versions]]
+requirement = "=1.8.2-r.1"
+version = "1.8.2-r.1"
+digest = "sha256:642c761f04a76e1757bb28ae2f43031d149fe0ff168fdec756568b545d93c2f7"
+
+[[packages]]
+name = "eryx:rg"
+
+[[packages.versions]]
+requirement = "=15.1.0-r.1"
+version = "15.1.0-r.1"
+digest = "sha256:b351c0e13ce56c40d95cc1786296129d680223c2c1c0b7646b867e1a11cde3ec"
+
+[[packages]]
+name = "eryx:sd"
+
+[[packages.versions]]
+requirement = "=1.1.0-r.1"
+version = "1.1.0-r.1"
+digest = "sha256:28c62532f5c70f8d977c9cb676cf956c361afa53b334f750a3f03cf44133651c"
+
+[[packages]]
+name = "eryx:sqlite3"
+
+[[packages.versions]]
+requirement = "=3.53.2-r.1"
+version = "3.53.2-r.1"
+digest = "sha256:9fc4760f3f31a30a4f3559c812094ca3598a9a55d21ba75cbf83d9a71e1e45d4"
