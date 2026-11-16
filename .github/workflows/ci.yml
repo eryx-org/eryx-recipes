@@ -41,6 +41,12 @@ on:
           --insecure-ignore-tlog (see the README)
         type: boolean
         default: true
+      sign_run_id:
+        description: >-
+          Sign and attach what an earlier run published, by its run ID,
+          instead of building and publishing (see the sign job)
+        type: string
+        default: ''
 
 # A manual run gets a group of its own, so a push to main queued behind it
 # can't cancel it while it waits (GitHub keeps one pending run per group).
@@ -152,7 +158,7 @@ jobs:
   rust:
     name: Build ${{ matrix.cli }} (Rust lane)
     needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -209,7 +215,7 @@ jobs:
   c:
     name: Build ${{ matrix.cli }} (C lane)
     needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.c == 'true'
+    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.c == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -276,7 +282,7 @@ jobs:
   go:
     name: Build gh (Go lane)
     needs: changes
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true'
+    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -375,16 +381,6 @@ jobs:
             --fail-existing --out scratch/results.json "${dirs[@]}"
           python3 scripts/publish.py lock --results scratch/results.json
           cat scratch/results.json
-      # The sign job's steps, with a key made for this run instead of keyless
-      # signing (which would certify a run that isn't the publish job's).
-      - name: Sign and attach to the local registry
-        if: ${{ hashFiles('scratch/results.json') != '' }}
-        env:
-          COSIGN_PASSWORD: ''
-        run: |
-          cosign generate-key-pair --output-key-prefix scratch/dry-run
-          python3 scripts/sign.py --insecure --key scratch/dry-run.key --pub scratch/dry-run.pub \
-            scratch/results.json scratch/*-component
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: publish-dry-run
@@ -393,6 +389,23 @@ jobs:
             commands.lock
           if-no-files-found: ignore
           retention-days: 14
+      # The sign job's steps, with a key made for this run instead of keyless
+      # signing (which would certify a run that isn't the publish job's). The
+      # results are read back from the artifact, as the sign job reads
+      # `published`, so a path that only works locally fails here.
+      - if: ${{ hashFiles('scratch/results.json') != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publish-dry-run
+          path: scratch/published
+      - name: Sign and attach to the local registry
+        if: ${{ hashFiles('scratch/results.json') != '' }}
+        env:
+          COSIGN_PASSWORD: ''
+        run: |
+          cosign generate-key-pair --output-key-prefix scratch/dry-run
+          python3 scripts/sign.py --insecure --key scratch/dry-run.key --pub scratch/dry-run.pub \
+            scratch/published/scratch/results.json scratch/*-component
 
   # The real publish: manual runs on main with `publish` set, by Ben, after
   # the dry run. Packages are private and linked to this repo
@@ -406,7 +419,7 @@ jobs:
   publish:
     name: Publish to ghcr.io
     needs: publish-dry-run
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' && github.actor == 'sd2k' && github.triggering_actor == 'sd2k' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.sign_run_id && github.ref == 'refs/heads/main' && github.actor == 'sd2k' && github.triggering_actor == 'sd2k' }}
     runs-on: ubuntu-latest
     # One publish at a time, never cancelled: the check that a version isn't
     # in the registry yet is only good while nothing else is pushing.
@@ -463,9 +476,16 @@ jobs:
   # is already attached, so a re-run finishes a failed one). Keyless: the
   # certificate names this workflow on main, which is what consumers verify
   # (see the README).
+  #
+  # With `sign_run_id`, nothing is built or published: it signs what that
+  # earlier run published, from that run's `published` and component
+  # artifacts. Builds aren't reproducible, so a fresh run can't sign an
+  # earlier run's versions (sign.py skips a layer it didn't build). Same
+  # gate as publish.
   sign:
     name: Sign and attach
     needs: publish
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'sd2k' && github.triggering_actor == 'sd2k' && (needs.publish.result == 'success' || (inputs.sign_run_id && needs.publish.result == 'skipped')) }}
     runs-on: ubuntu-latest
     concurrency:
       group: publish-ghcr
@@ -475,6 +495,8 @@ jobs:
       packages: write
       # The OIDC token Fulcio issues the signing certificate for.
       id-token: write
+      # Another run's artifacts, with sign_run_id.
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -487,23 +509,64 @@ jobs:
           version: 2026.11.8
           install_args: aqua:sigstore/cosign aqua:oras-project/oras
           cache: false
+      # Only a real publish's artifacts get signed: a PR or branch run can
+      # upload an artifact named `published` too.
+      - name: Check the run to sign
+        if: ${{ inputs.sign_run_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.sign_run_id }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          run=$(gh api "repos/$REPO/actions/runs/$RUN_ID")
+          workflow=${WORKFLOW_REF#"$REPO"/}
+          workflow=${workflow%@*}
+          problems=$(jq -r --arg workflow "$workflow" '
+            [ (select(.path != $workflow) | "it ran \(.path), not \($workflow)"),
+              (select(.event != "workflow_dispatch") | "its event was \(.event), not workflow_dispatch"),
+              (select(.head_branch != "main") | "it ran on \(.head_branch), not main"),
+              (select(.actor.login != "sd2k" or .triggering_actor.login != "sd2k")
+                | "it was started by \(.actor.login) (triggered by \(.triggering_actor.login)), not sd2k"),
+              (select(.status != "completed") | "it is \(.status), not completed")
+            ] | .[]' <<< "$run")
+          publish=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.name == "Publish to ghcr.io") | .conclusion')
+          if [ "$publish" != success ]; then
+            problems+=$'\n'"its publish job's conclusion is '${publish:-missing}', not success"
+          fi
+          if [ -n "${problems//$'\n'/}" ]; then
+            echo "::error::run $RUN_ID isn't a finished publish of this workflow on main by sd2k:"
+            sed '/^$/d; s/^/- /' <<< "$problems"
+            exit 1
+          fi
+      # This run's artifacts, or with sign_run_id, that run's (run-id is only
+      # read when github-token is set).
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: '*-component'
           path: scratch
+          run-id: ${{ inputs.sign_run_id || github.run_id }}
+          github-token: ${{ inputs.sign_run_id && github.token || '' }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: published
           path: scratch/published
+          run-id: ${{ inputs.sign_run_id || github.run_id }}
+          github-token: ${{ inputs.sign_run_id && github.token || '' }}
       - name: Sign and attach
         env:
           ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
           TLOG: ${{ inputs.tlog_upload && '--tlog' || '--no-tlog' }}
+          # The provenance names the run that built what's signed.
+          ERYX_BUILD_RUN_ID: ${{ inputs.sign_run_id }}
         run: |
           # cosign reads the credentials oras stores (~/.docker/config.json).
           oras login ghcr.io -u "$ACTOR" --password-stdin <<< "$GH_TOKEN"
-          python3 scripts/sign.py "$TLOG" scratch/published/results.json scratch/*-component
+          # `published` holds scratch/results.json and commands.lock, at the
+          # paths they were uploaded from.
+          python3 scripts/sign.py "$TLOG" scratch/published/scratch/results.json scratch/*-component
 
   # Record the versions in commands.lock through a PR, so the index changes
   # are reviewed like any other. Results include versions that were already
