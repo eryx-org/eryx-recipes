@@ -20,6 +20,46 @@ mise run check-clis               # validate every manifest
 
 `build-cli` installs eryx-build from eryx-org/eryx at `mise.toml`'s `eryx_rev` into `scratch/tools` the first time. C recipes need the WASI SDK (`mise run ensure-wasi-sdk`), and gh needs the wasip3 Go fork (`scripts/bootstrap-go-wasip3.sh`). Sources and outputs go in the git-ignored `scratch/`.
 
+## Publishing
+
+Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its name (`[eryx.rg]` is `eryx:rg`).
+
+- **Bumping:** a PR that changes what a command is built from (its manifest, patches, shims, or the eryx-build, Rust, WASI SDK or Go-fork pins) must bump its `r.<n>`, and a new upstream version starts at `r.1`. `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR.
+- **Dry run:** every CI run publishes what it built to a throwaway registry on the runner. It reads each push back, checks the layer against `component.wasm`, and uploads the would-be `commands.lock`.
+- **Real publish:** run the CI workflow by hand on `main` with `publish` set. After the dry run, and once the `ghcr-publish` environment approves, it pushes every built command whose version isn't in the registry yet to `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>`. Then it opens a PR that adds them to `commands.lock`.
+- **Versions are never replaced:** a version that's already published is skipped, and `--fail-existing` makes that an error.
+
+`scripts/publish.py publish` pushes with `wkg oci push`, which writes the Wasm OCI layout wkg reads:
+- an `application/vnd.wasm.config.v0+json` config with the component's imports and exports;
+- one `application/wasm` layer.
+
+It annotates the manifest from the build's `provenance.json`:
+
+| Annotation | |
+|---|---|
+| `org.opencontainers.image.title` | `<namespace>:<name>` |
+| `org.opencontainers.image.version` | the version |
+| `org.opencontainers.image.description` | from the manifest |
+| `org.opencontainers.image.source`, `.revision` | this repo and commit |
+| `org.opencontainers.image.created` | the publish time |
+| `org.opencontainers.image.licenses` | the SPDX licences of the tool and what it links, joined with `AND` |
+| `run.eryx.command.upstream` | `<repo>@<commit>`, or `<url>#sha256:<digest>` for an archive |
+| `run.eryx.command.eryx-build` | the eryx-build version |
+| `run.eryx.command.wit` | the WIT packages it imports, with versions (`wasi:cli@0.2.12,...`) |
+| `run.eryx.command.names` | for a multicall command, every name it answers to (`names` in `commands.toml`) |
+
+`commands.lock`, in wkg.lock's format, lists every published version with its layer digest. eryx's own `commands.lock` copies its pins from it.
+
+To fetch a command with wkg, map the namespaces in wkg's `config.toml`:
+
+```toml
+[namespace_registries]
+eryx = { registry = "eryx", metadata = { preferredProtocol = "oci", oci = { registry = "ghcr.io", namespacePrefix = "eryx-org/commands/" } } }
+eryx-gpl = { registry = "eryx", metadata = { preferredProtocol = "oci", oci = { registry = "ghcr.io", namespacePrefix = "eryx-org/commands/" } } }
+```
+
+Then run `wkg get eryx:sd@1.1.0-r.1`. The packages are private for now, so wkg needs credentials, such as `docker login ghcr.io`.
+
 ## Licence
 
 The recipes, patches and tooling here are dual-licensed under MIT and Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`), like eryx. The commands themselves keep their upstream licences, which their published notices carry. GPL components are built from `clis/gpl/`, whose recipes carry their own notices.

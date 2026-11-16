@@ -10,7 +10,11 @@
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
 #
 # Each component is uploaded as a workflow artifact with its manifest.toml and
-# provenance.json, for testing. Publishing to the registry is #5.
+# provenance.json. Then every run publishes what it built (#5):
+# - to a throwaway registry on the runner, always (the dry run): the push is
+#   read back and checked, and the would-be commands.lock is uploaded;
+# - to ghcr.io/eryx-org/commands, only from a manual run with `publish` set,
+#   after the dry run passes and the ghcr-publish environment approves.
 
 name: CI
 
@@ -21,7 +25,12 @@ on:
     branches: [main]
   schedule:
     - cron: '23 6 * * 1' # Mondays
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the built commands to ghcr.io (versions already there are skipped)
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -92,6 +101,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # check-versions diffs against the PR's base.
+          fetch-depth: 0
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
@@ -102,6 +113,13 @@ jobs:
       - run: mise run check-clis
       # The vendored eryx WIT matches eryx's at the pinned commit.
       - run: mise run check-wit
+      - run: python3 -m unittest discover -s scripts
+      # Every recipe has a version in commands.toml, matching its upstream;
+      # on a PR, every command whose build inputs changed has a new one.
+      - name: Check commands.toml
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 scripts/publish.py check-versions ${BASE:+--base "$BASE"}
 
   rust:
     name: Build ${{ matrix.cli }} (Rust lane)
@@ -248,3 +266,136 @@ jobs:
             scratch/gh-component/provenance.json
           if-no-files-found: error
           retention-days: 14
+
+  # Publish what this run built to a throwaway registry on the runner, and read
+  # it back: everything a real publish does except the destination.
+  publish-dry-run:
+    name: Publish (dry run)
+    needs: [check, rust, c, go]
+    if: ${{ !cancelled() && needs.check.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-binstall
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.8
+          install_args: cargo:wkg
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-component'
+          path: scratch
+      - name: Publish to the local registry
+        id: publish
+        run: |
+          shopt -s nullglob
+          dirs=(scratch/*-component)
+          if [ ${#dirs[@]} -eq 0 ]; then
+            echo "Nothing was built, so there's nothing to publish."
+            echo "results=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/publish.py publish --registry localhost:5000 --insecure \
+            --fail-existing --out scratch/results.json "${dirs[@]}"
+          python3 scripts/publish.py lock --results scratch/results.json
+          cat scratch/results.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publish-dry-run
+          path: |
+            scratch/results.json
+            commands.lock
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The real publish: manual runs with `publish` set only, after the dry run,
+  # behind the ghcr-publish environment's approval. Packages are private and
+  # linked to this repo (org.opencontainers.image.source).
+  publish:
+    name: Publish to ghcr.io
+    needs: publish-dry-run
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: ghcr-publish
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      # What was pushed: each command's reference, layer digest and
+      # manifest_digest. Signing and attestations (#6) attach to the latter,
+      # in a job that `needs: publish` (with `id-token: write`).
+      results: ${{ steps.publish.outputs.results }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-binstall
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.8
+          install_args: cargo:wkg
+          cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-component'
+          path: scratch
+      - name: Publish to ghcr.io
+        id: publish
+        env:
+          WKG_OCI_USERNAME: ${{ github.actor }}
+          WKG_OCI_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/publish.py publish --registry ghcr.io \
+            --out scratch/results.json scratch/*-component
+          python3 scripts/publish.py lock --results scratch/results.json
+          echo "results=$(jq -c . scratch/results.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: published
+          path: |
+            scratch/results.json
+            commands.lock
+          retention-days: 90
+
+  # Record the new versions in commands.lock through a PR, so the index changes
+  # are reviewed like any other.
+  record:
+    name: Record in commands.lock
+    needs: publish
+    if: ${{ needs.publish.outputs.results != '[]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: published
+          path: scratch/published
+      - name: Open a PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          cp scratch/published/commands.lock commands.lock
+          branch="publish/run-$RUN_ID"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add commands.lock
+          git commit -m "chore: record the commands published by run $RUN_ID"
+          git push "https://x-access-token:$GH_TOKEN@github.com/$REPO" "$branch"
+          gh pr create --head "$branch" --title "chore: record published commands (run $RUN_ID)" \
+            --body "Versions published by https://github.com/$REPO/actions/runs/$RUN_ID, from its results.json."
