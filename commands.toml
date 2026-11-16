@@ -1,0 +1,44 @@
+# The published version of each command (#5): `<upstream>-r.<n>`.
+#
+# The table key is the command's name, `<namespace>.<name>` (`eryx:rg` is
+# `[eryx.rg]`), which is also its registry path:
+# ghcr.io/eryx-org/commands/<namespace>/<name>:<version>. GPL commands
+# (clis/gpl/) use the `eryx-gpl` namespace.
+#
+# - `version`: the upstream version, then `-r.<n>`, our build revision. Bump
+#   `n` for any change to the built component at the same upstream version: its
+#   manifest, patches or shims, or the pinned eryx-build, Rust, WASI SDK or Go
+#   fork. Go back to `r.1` when the upstream version changes.
+#   `scripts/publish.py check-versions` enforces this on PRs. Published
+#   versions are never overwritten.
+# - `upstream` (optional): the upstream version, when it can't be read from the
+#   manifest's `source.ref` once a leading `v` or `<name>-` is dropped and `_`
+#   becomes `.`.
+# - `manifest` (optional): the recipe, if it isn't `clis/<name>.toml` (or
+#   `clis/gpl/<name>/<name>.toml` for `eryx-gpl`).
+# - `names` (optional): every name a multicall command answers to, recorded in
+#   its `run.eryx.command.names` annotation.
+
+[eryx.curl]
+version = "8.20.0-r.1"
+
+[eryx.gh]
+version = "2.87.3-r.1"
+
+[eryx.jaq]
+version = "3.1.2-r.1"
+
+[eryx.jq]
+version = "1.8.2-r.1"
+
+[eryx.rg]
+version = "15.1.0-r.1"
+
+[eryx.sd]
+version = "1.1.0-r.1"
+
+[eryx.sqlite3]
+version = "3.53.2-r.1"
+
+[eryx-gpl.git]
+version = "2.56.1-r.1"

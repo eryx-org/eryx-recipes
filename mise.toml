@@ -38,8 +38,10 @@ version = "0.16.2"
 wasi_sdk_version = "wasi-sdk-33"
 # The eryx commit whose eryx-build builds the commands, and whose WIT
 # (wit/process.wit) git is built against. Until eryx-build is on crates.io
-# (eryx-org/eryx#997) it's installed from git at this commit.
-eryx_rev = "e4c317dda8d59cd60875f769c4f0881cf46c7525"
+# (eryx-org/eryx#997) it's installed from git at this commit. It needs to be
+# at least eryx-org/eryx#1004, whose provenance.json records the eryx-build
+# version and the WIT imports the registry annotations come from.
+eryx_rev = "2f605599fc5084ae4c1586466e6facbdcab3d662"
 # google/licenseclassifier's identify_license, which classifies a Go
 # command's module licence files for its notices. Installed with the host
 # Go into scratch/tools, like eryx-build.

@@ -1,0 +1,3 @@
+# Every published command version and its layer digest, in wkg.lock's
+# format. Written by `scripts/publish.py lock`; don't edit by hand.
+version = 1
