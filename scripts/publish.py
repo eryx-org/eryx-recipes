@@ -470,10 +470,11 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
         reference = f"{registry.host}/{repository}:{entry['version']}"
         component = directory / "component.wasm"
         digest = sha256_file(component)
-        # A command only goes out with its third-party notices (#4), which
+        # A command only goes out with its third-party notices (#4) and SBOM, which
         # CI writes next to it; #6 attaches them to the manifest.
-        if not (directory / f"{name}.notices.md").is_file():
-            raise Error(f"{directory}: no {name}.notices.md, so {reference} can't be published")
+        for file in (f"{name}.notices.md", f"{name}.spdx.json"):
+            if not (directory / file).is_file():
+                raise Error(f"{directory}: no {file}, so {reference} can't be published")
 
         existing = registry.manifest(repository, entry["version"])
         if existing is not None:

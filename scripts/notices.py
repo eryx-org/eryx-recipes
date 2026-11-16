@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Third-party notices for the published command components (eryx-org/eryx#837).
 
-    scripts/notices.py generate OUTDIR NAME...   # write OUTDIR/<name>.notices.md
+    scripts/notices.py generate OUTDIR NAME...   # write OUTDIR/<name>.notices.md and .spdx.json
     scripts/notices.py check                     # what CI's check job runs
     scripts/notices.py published NAME            # print yes or no
 
@@ -19,6 +19,9 @@ build-cli -- NAME`). cargo-about's crate list is checked against `cargo tree`
 for the same target and features (see cargo_about). The standard library's
 come from the toolchain's rust-src (`mise run ensure-rust-src`).
 
+`generate` also writes each command's SBOM, `<name>.spdx.json` (SPDX 2.3):
+the command, and every package its notices list, as packages it contains.
+
 `check` reads the manifests and manual.toml only, and fails, listing every
 failure, when:
 - a published command, or one of its [[deps]], has no entry, or a command of
@@ -29,6 +32,8 @@ failure, when:
 - a licence file an entry names doesn't exist.
 """
 
+import datetime
+import hashlib
 import json
 import os
 import re
@@ -87,6 +92,12 @@ def stable_toolchain():
 STABLE = stable_toolchain()
 
 
+def published_version(name):
+    """Command `name`'s version in commands.toml (`<upstream>-r.<n>`)."""
+    namespace = "eryx-gpl" if COMMANDS[name].startswith("clis/gpl/") else "eryx"
+    return tomllib.loads((ROOT / "commands.toml").read_text())[namespace][name]["version"]
+
+
 def manifest(name):
     return tomllib.loads((ROOT / COMMANDS[name]).read_text())
 
@@ -122,10 +133,68 @@ def run(command, **kwargs):
     return result.stdout
 
 
-def cargo_about(args, output, label, cwd=ROOT, env=None, config=ROOT / "about.toml"):
+def spdx_package(name, version, licence, location, purl=None):
+    """An SPDX 2.3 package for the SBOM. Its SPDXID is set when the document is written."""
+    package = {
+        "name": name,
+        "versionInfo": version,
+        "downloadLocation": location or "NOASSERTION",
+        "filesAnalyzed": False,
+        "licenseConcluded": "NOASSERTION",
+        "licenseDeclared": licence or "NOASSERTION",
+        "copyrightText": "NOASSERTION",
+    }
+    if purl:
+        package["externalRefs"] = [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": purl}]
+    return package
+
+
+def crate_package(package, licence):
+    """The SPDX package of a crate, from its `cargo metadata` entry."""
+    name, version = package["name"], package["version"]
+    # A crate from crates.io, or a path source: one of the checkout's own,
+    # or the standard library's (std, core, ...), which crates.io doesn't
+    # have, so no purl.
+    if (package.get("source") or "").startswith("registry+"):
+        location = f"https://crates.io/api/v1/crates/{name}/{version}/download"
+        return spdx_package(name, version, licence, location, f"pkg:cargo/{name}@{version}")
+    return spdx_package(name, version, licence, package.get("repository"))
+
+
+def sbom_document(name, packages, created=None):
+    """Command `name`'s SBOM: the command (packages[0]) contains the rest.
+    The namespace is a hash of the packages, the command's version and
+    component.wasm digest included, so the same build gives the same
+    document apart from `created`, and another build a different one."""
+    # A crate both the command and its standard library use is listed once.
+    unique = []
+    for p in packages:
+        if p not in unique:
+            unique.append(p)
+    packages = [{**p, "SPDXID": f"SPDXRef-Package-{i}"} for i, p in enumerate(unique)]
+    digest = hashlib.sha256(json.dumps(packages, sort_keys=True).encode()).hexdigest()
+    created = created or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": name,
+        "documentNamespace": f"https://github.com/eryx-org/eryx-commands/spdx/{name}-{digest}",
+        "creationInfo": {"created": created, "creators": ["Tool: eryx-commands scripts/notices.py"]},
+        "packages": packages,
+        "relationships": [
+            {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-0"},
+            *({"spdxElementId": "SPDXRef-Package-0", "relationshipType": "CONTAINS", "relatedSpdxElement": p["SPDXID"]}
+              for p in packages[1:]),
+        ],
+    }
+
+
+def cargo_about(args, output, label, cwd=ROOT, env=None, config=ROOT / "about.toml", sbom=None):
     """Render the Rust crates' notices; false if any licence can't be accepted,
     or cargo-about leaves out a crate cargo builds that can't be accounted for
-    otherwise (see missed_section). `label` names what they're the crates of."""
+    otherwise (see missed_section). `label` names what they're the crates of.
+    Each crate is added to `sbom` (a list of SPDX packages) too."""
     binary = pinned_cargo_about()
 
     def run_about(extra, out):
@@ -141,7 +210,10 @@ def cargo_about(args, output, label, cwd=ROOT, env=None, config=ROOT / "about.to
         listed = Path(tmp) / "crates.json"
         if not run_about(["--format", "json"], listed):
             return False
-        about = {f"{c['package']['name']} {c['package']['version']}" for c in json.loads(listed.read_text())["crates"]}
+        crates = json.loads(listed.read_text())["crates"]
+        about = {f"{c['package']['name']} {c['package']['version']}" for c in crates}
+        if sbom is not None:
+            sbom += [crate_package(c["package"], c.get("license") or c["package"].get("license")) for c in crates]
     cargo = tree_crates(args, cwd, env)
     # cargo-about resolves targets and features itself, and can disagree with
     # cargo (0.7.1 dropped every crate only wasm32-wasip3 uses, and missed
@@ -151,7 +223,7 @@ def cargo_about(args, output, label, cwd=ROOT, env=None, config=ROOT / "about.to
         print(f"warning: cargo-about listed {name}, which cargo doesn't build for {args}", file=sys.stderr)
     missed = sorted(cargo - about)
     if missed:
-        section = missed_section(missed, args, label, cwd, env)
+        section = missed_section(missed, args, label, cwd, env, sbom)
         if section is None:
             return False
         with output.open("a") as f:
@@ -170,7 +242,7 @@ def accepted_licence(expression):
     )
 
 
-def missed_section(missed, args, label, cwd, env):
+def missed_section(missed, args, label, cwd, env, sbom=None):
     """Notices for crates cargo builds but cargo-about left out, from each
     crate's declared licence and its licence files; None (after reporting
     why) if one can't be accounted for."""
@@ -191,6 +263,8 @@ def missed_section(missed, args, label, cwd, env):
             ok = False
             continue
         out += [f"### {name}", "", f"Licence: {licence}  ", f"Source: {package.get('repository') or 'crates.io'}", ""]
+        if sbom is not None:
+            sbom.append(crate_package(package, licence))
         for f in files:
             out += ["```", f.read_text(errors="replace").rstrip(), "```", ""]
     return "\n".join(out) if ok else None
@@ -264,7 +338,7 @@ def std_overlay(library, tmp):
     return overlay
 
 
-def std_section(path, toolchain, targets):
+def std_section(path, toolchain, targets, sbom=None):
     """Append the notices of `toolchain`'s standard library, as built for
     `targets`, to `path`; false if cargo-about fails."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -287,7 +361,7 @@ def std_section(path, toolchain, targets):
             "-m", str(std / "Cargo.toml"), "--features", "backtrace panic-unwind",
             *(a for t in targets for a in ("--target", t)),
         ]
-        if not cargo_about(args, rendered, "the Rust standard library", cwd=std, env=env, config=config):
+        if not cargo_about(args, rendered, "the Rust standard library", cwd=std, env=env, config=config, sbom=sbom):
             return False
         version = subprocess.run(
             ["rustc", f"+{toolchain}", "--version"], capture_output=True, text=True, check=True
@@ -350,8 +424,12 @@ def cli_about_args(artifact, required):
     return ["-m", str(cargo_toml), "--target", "wasm32-wasip2", *flags]
 
 
-def manual_section(artifact):
+def manual_section(artifact, sbom=None):
     entries = [c for c in components() if artifact in c["artifacts"]]
+    if sbom is not None:
+        # Not the tool's own entry: generate starts the SBOM with the tool.
+        sbom += [spdx_package(c["name"], c["version"], c["license"], c["url"])
+                 for c in entries if not (c.get("cli") == COMMANDS[artifact] and "cli_dep" not in c)]
     if not entries:
         return ""
     out = ["", "# Other third-party code", ""]
@@ -403,7 +481,7 @@ def mpl_changes(checkout, module, version, env):
     return changed
 
 
-def go_section(name, path):
+def go_section(name, path, sbom=None):
     """Append the notices of the Go modules command `name` links to `path`;
     false (after reporting why) if one's licence isn't accepted or isn't
     found.
@@ -484,6 +562,9 @@ def go_section(name, path):
                 *([f"Repository: https://{module}/tree/{version}"] if module.startswith("github.com/") else []),
             ]
         out += [f"## {module} {version}", "", f"Licence: {' AND '.join(names)}  ", *(f"{line}  " for line in source), ""]
+        if sbom is not None:
+            sbom.append(spdx_package(module, version, " AND ".join(names), f"https://proxy.golang.org/{escape_module(module)}/@v/{version}.zip",
+                                     f"pkg:golang/{module}@{version}"))
         for f in files[module]:
             out += ["```", f.read_text(errors="replace").rstrip(), "```", ""]
     if ok:
@@ -502,24 +583,41 @@ def generate(outdir, names):
         if name not in PUBLISHED:
             sys.exit(f"{name} isn't published yet (UNPUBLISHED), so it has no complete notices")
         path = outdir / f"{name}.notices.md"
-        lang = manifest(name)["lang"]
+        m = manifest(name)
+        lang = m["lang"]
+        source = m["source"]
+        # The command itself, as published (its commands.toml version and
+        # the component built); what it statically links ([[deps]]) is in
+        # manual.toml.
+        component = ROOT / m["output"]["dir"] / "component.wasm"
+        if not component.is_file():
+            sys.exit(f"{name}: {component} isn't built; run `mise run build-cli -- {name}` first")
+        tool = spdx_package(
+            name, published_version(name), m["license"],
+            f"git+{source['repo']}@{source['commit']}" if source.get("commit") else source["repo"],
+        )
+        tool["sourceInfo"] = f"built from {source['repo']} at {source['ref']}"
+        with component.open("rb") as f:
+            tool["checksums"] = [{"algorithm": "SHA256", "checksumValue": hashlib.file_digest(f, "sha256").hexdigest()}]
+        sbom = [tool]
         if lang not in LANE_ENTRIES:
             sys.exit(f"{name}: no notices for the {lang} lane (LANE_ENTRIES)")
         args = cli_about_args(name, required=True)
         if manifest(name)["lang"] == "go":
             path.write_text("# Third-party notices\n")
-            if not go_section(name, path):
+            if not go_section(name, path, sbom):
                 failed.append(name)
                 continue
         elif args is None:
             path.write_text("# Third-party notices\n")
         else:
             run(["cargo", "fetch", "--locked", "--manifest-path", args[args.index("-m") + 1]])
-            if not cargo_about(args, path, name) or not std_section(path, STABLE, [RUST_TARGET]):
+            if not cargo_about(args, path, name, sbom=sbom) or not std_section(path, STABLE, [RUST_TARGET], sbom):
                 failed.append(name)
                 continue
         with path.open("a") as f:
-            f.write(manual_section(name))
+            f.write(manual_section(name, sbom))
+        (outdir / f"{name}.spdx.json").write_text(json.dumps(sbom_document(name, sbom), indent=2) + "\n")
     return failed
 
 

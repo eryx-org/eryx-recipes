@@ -202,6 +202,7 @@ jobs:
             scratch/${{ matrix.cli }}-component/manifest.toml
             scratch/${{ matrix.cli }}-component/provenance.json
             scratch/${{ matrix.cli }}-component/*.notices.md
+            scratch/${{ matrix.cli }}-component/*.spdx.json
           if-no-files-found: error
           retention-days: 14
 
@@ -266,6 +267,7 @@ jobs:
             scratch/${{ matrix.cli }}-component/manifest.toml
             scratch/${{ matrix.cli }}-component/provenance.json
             scratch/${{ matrix.cli }}-component/*.notices.md
+            scratch/${{ matrix.cli }}-component/*.spdx.json
             scratch/${{ matrix.cli }}-component/COPYING
             scratch/${{ matrix.cli }}-component/NOTICE.md
           if-no-files-found: error
@@ -329,6 +331,7 @@ jobs:
             scratch/gh-component/manifest.toml
             scratch/gh-component/provenance.json
             scratch/gh-component/gh.notices.md
+            scratch/gh-component/gh.spdx.json
           if-no-files-found: error
           retention-days: 14
 

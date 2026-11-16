@@ -18,7 +18,7 @@ clis/smoke.sh rg                  # run it under the wasmtime CLI
 mise run check-clis               # validate every manifest
 ```
 
-After a build, `mise run notices -- OUTDIR rg` writes the command's third-party notices (see `scripts/notices.py`), and `mise run notices-check` checks every published command's notice entries in `third_party/manual.toml`.
+After a build, `mise run notices -- OUTDIR rg` writes the command's third-party notices and its SPDX 2.3 SBOM, `<name>.spdx.json` (see `scripts/notices.py`), and `mise run notices-check` checks every published command's notice entries in `third_party/manual.toml`.
 
 `build-cli` installs eryx-build from eryx-org/eryx at `mise.toml`'s `eryx_rev` into `scratch/tools` the first time. C recipes need the WASI SDK (`mise run ensure-wasi-sdk`), and gh needs the wasip3 Go fork (`scripts/bootstrap-go-wasip3.sh`). Sources and outputs go in the git-ignored `scratch/`.
 
@@ -81,6 +81,7 @@ After a real publish, the sign job (`scripts/sign.py`) attaches these to each co
 | a cosign signature | keyless: a Fulcio certificate for this repo's publish workflow on `main` |
 | a SLSA v1 provenance attestation (`https://slsa.dev/provenance/v1`) | the workflow run, this repo's commit, and the upstream source and patches from `provenance.json` |
 | `application/vnd.eryx.notices.v1+markdown` | the command's third-party notices |
+| `application/spdx+json` | an SPDX 2.3 SBOM: the command (its published version, with `component.wasm`'s SHA-256), containing every package its notices list (crates with `pkg:cargo` purls, Go modules with `pkg:golang` purls, and what it links from `third_party/manual.toml`) |
 | `application/vnd.eryx.source-offer.v1+json` | GPL commands only: the complete corresponding source, next to the binary. Its layers are `<name>-recipe.tar.gz` (every build input from this repo at the published commit: the recipe, patches, shims and WIT, plus `BUILD-INPUTS.json` with the tool pins such as `eryx_rev` and the WASI SDK) and the upstream sources at their pins (the tool's own tree at its commit, and each statically linked dependency's archive). Its config lists all of them with their digests. |
 
 cosign 3 stores signatures and attestations as Sigstore bundles in referrers too; on a registry without the referrers API they're listed under the `sha256-<digest>` tag. The job skips whatever's already attached, so a re-run finishes a failed one without duplicates. It only signs a manifest (by digest) whose layer is this run's `component.wasm` and, if publish found it already there, whose revision is a commit of `main`. A version that was already in the registry with another layer (a full re-run rebuilds, and builds aren't guaranteed to be reproducible) is left unsigned and listed in the job summary; re-run only the failed jobs, which reuse the original build, or publish a new version. The dry run signs and attaches the same way, to its throwaway registry, with a key made for the run.
@@ -94,7 +95,7 @@ issuer=https://token.actions.githubusercontent.com
 cosign verify --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
 cosign verify-attestation --type slsaprovenance1 \
   --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
-oras discover "$ref"   # the notices and source offer
+oras discover "$ref"   # the notices, SBOM and source offer
 ```
 
 The workflow's `tlog_upload` input (on by default) says whether signing records the signatures in Sigstore's public transparency log, Rekor:

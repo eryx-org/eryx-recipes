@@ -10,7 +10,8 @@ manifest digest:
 - sign it with cosign;
 - attest its SLSA provenance (`cosign attest --type slsaprovenance1`);
 - attach its notices (`<name>.notices.md`, from its COMPONENT_DIR) as an OCI
-  referrer of type `application/vnd.eryx.notices.v1+markdown`;
+  referrer of type `application/vnd.eryx.notices.v1+markdown`, and its SPDX
+  SBOM (`<name>.spdx.json`) as one of type `application/spdx+json`;
 - for a GPL command (namespace `eryx-gpl`), attach its complete
   corresponding source as a referrer of type
   `application/vnd.eryx.source-offer.v1+json` (see source_offer), so it sits
@@ -63,6 +64,7 @@ IDENTITY = f"{SOURCE_URL}/.github/workflows/ci.yml@refs/heads/main"
 ISSUER = "https://token.actions.githubusercontent.com"
 
 NOTICES_TYPE = "application/vnd.eryx.notices.v1+markdown"
+SBOM_TYPE = "application/spdx+json"
 SOURCE_OFFER_TYPE = "application/vnd.eryx.source-offer.v1+json"
 RECIPE_MEDIA_TYPE = "application/vnd.eryx.source-offer.recipe.v1.tar+gzip"
 UPSTREAM_MEDIA_TYPE = "application/vnd.eryx.source-offer.upstream.v1.tar+gzip"
@@ -384,13 +386,16 @@ def sign_all(results: list[dict], dirs: list[Path], tools: Tools, env: dict,
                 provenance_predicate(result, provenance, revision, env), indent=2))
             tools.attest(ref, predicate)
 
-        notices = directory / f"{name}.notices.md"
-        if not notices.is_file():
-            raise Error(f"{directory}: no {notices.name}")
-        if tools.referrers(ref, NOTICES_TYPE):
-            print(f"{ref}: notices already attached", file=sys.stderr)
-        else:
-            tools.attach(ref, NOTICES_TYPE, [(notices, "text/markdown")])
+        for what, path, artifact_type, media_type in [
+            ("notices", directory / f"{name}.notices.md", NOTICES_TYPE, "text/markdown"),
+            ("SBOM", directory / f"{name}.spdx.json", SBOM_TYPE, SBOM_TYPE),
+        ]:
+            if not path.is_file():
+                raise Error(f"{directory}: no {path.name}")
+            if tools.referrers(ref, artifact_type):
+                print(f"{ref}: {what} already attached", file=sys.stderr)
+            else:
+                tools.attach(ref, artifact_type, [(path, media_type)])
 
         if namespace == GPL_NAMESPACE:
             if tools.referrers(ref, SOURCE_OFFER_TYPE):

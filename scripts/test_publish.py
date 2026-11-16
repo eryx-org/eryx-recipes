@@ -137,6 +137,7 @@ class Publish(unittest.TestCase):
             (component / "component.wasm").write_bytes(b"local build")
             (component / "provenance.json").write_text('{"name": "sd"}')
             (component / "sd.notices.md").write_text("notices")
+            (component / "sd.spdx.json").write_text("{}")
             version = publish.load_commands((publish.ROOT / "commands.toml").read_text())[("eryx", "sd")]["version"]
             registry = FakeRegistry({("eryx-org/commands/eryx/sd", version): "sha256:published"})
             out = Path(tmp) / "results.json"
