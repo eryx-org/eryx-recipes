@@ -19,6 +19,11 @@ version = "50.0.1"
 [tools."github:bytecodealliance/wit-bindgen"]
 version = "0.63.0"
 
+# Inspects built components (the C and Go lanes, smoke checks). The same
+# version as eryx's.
+[tools."cargo:wasm-tools"]
+version = "1.263.0"
+
 # The commands' third-party notices. 0.9 knows wasm32-wasip3.
 [tools."cargo:cargo-about"]
 version = "0.9.3"
@@ -31,3 +36,66 @@ version = "0.16.2"
 # picks up wasm clang for proc-macro builds), so builds install it on demand.
 [vars]
 wasi_sdk_version = "wasi-sdk-33"
+# The eryx commit whose eryx-build builds the commands, and whose WIT
+# (wit/process.wit) git is built against. Until eryx-build is on crates.io
+# (eryx-org/eryx#997) it's installed from git at this commit.
+eryx_rev = "e4c317dda8d59cd60875f769c4f0881cf46c7525"
+
+[tasks.install-eryx-build]
+description = "Install eryx-build from eryx-org/eryx at vars.eryx_rev into scratch/tools"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+BIN=scratch/tools/bin/eryx-build
+if [ -x "$BIN" ] && [ "$(cat scratch/tools/eryx-rev 2>/dev/null)" = "{{vars.eryx_rev}}" ]; then
+    exit 0
+fi
+cargo install --locked --quiet --root scratch/tools \
+    --git https://github.com/eryx-org/eryx --rev "{{vars.eryx_rev}}" eryx-build
+echo "{{vars.eryx_rev}}" > scratch/tools/eryx-rev
+"""
+
+[tasks.ensure-wasi-sdk]
+description = "Install the WASI SDK if it isn't installed"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+SPEC="github:WebAssembly/wasi-sdk@{{vars.wasi_sdk_version}}"
+mise where "$SPEC" >/dev/null 2>&1 || mise install "$SPEC"
+[ -f "$(mise where "$SPEC")/bin/clang" ] || { echo "WASI SDK install incomplete: no clang" >&2; exit 1; }
+"""
+
+[tasks.build-cli]
+description = "Build a command from clis/<name>.toml. Usage: mise run build-cli -- <name|path.toml>"
+depends = ["install-eryx-build"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+NAME="${1:?Usage: mise run build-cli -- <name|path.toml> (e.g. rg, curl, gh)}"
+# The C lane needs the WASI SDK. Export it if installed, but don't install it
+# for Rust and Go builds; C manifests point at ensure-wasi-sdk when it's missing.
+if SDK="$(mise where "github:WebAssembly/wasi-sdk@{{vars.wasi_sdk_version}}" 2>/dev/null)"; then
+    export WASI_SDK_PATH="$SDK"
+fi
+scratch/tools/bin/eryx-build "$NAME"
+"""
+
+[tasks.list-clis]
+description = "List the command manifests"
+depends = ["install-eryx-build"]
+run = "scratch/tools/bin/eryx-build --list"
+
+[tasks.check-clis]
+description = "Validate the command manifests without building"
+depends = ["install-eryx-build"]
+run = "scratch/tools/bin/eryx-build --check"
+
+[tasks.check-wit]
+description = "Check wit/process.wit matches eryx's at vars.eryx_rev"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+curl -fsSL "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.eryx_rev}}/crates/eryx-runtime/wit/deps/process.wit" \
+    | diff - <(tail -n +4 wit/process.wit) \
+    || { echo "wit/process.wit differs from eryx's at {{vars.eryx_rev}}; re-vendor it" >&2; exit 1; }
+"""

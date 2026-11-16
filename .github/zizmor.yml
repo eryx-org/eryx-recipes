@@ -1,0 +1,8 @@
+# zizmor configuration: https://docs.zizmor.sh/configuration/ (as eryx's).
+rules:
+  # GitHub's `uses: $/...` self-repository syntax is too new for actionlint
+  # (rhysd/actionlint#745), which rejects it outright. Every local action here
+  # runs straight after a fresh checkout, with nothing in between that could
+  # rewrite .github/actions.
+  self-repository:
+    disable: true

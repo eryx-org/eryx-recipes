@@ -1,0 +1,25 @@
+name: "Install eryx-build"
+description: "Install eryx-build at mise.toml's eryx_rev, cached per pin"
+
+# `mise run install-eryx-build` builds it from eryx-org/eryx with cargo
+# install (a few minutes); the cache keeps that to once per pin. Needs mise
+# (with rust) set up first.
+runs:
+  using: "composite"
+  steps:
+    - name: Restore eryx-build
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: scratch/tools
+        key: eryx-build-${{ hashFiles('mise.toml') }}
+    - name: Install eryx-build
+      shell: bash
+      run: mise run install-eryx-build
+    # Only pushes to main save, so a PR's cache can't stand in for main's.
+    - name: Save eryx-build
+      if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: scratch/tools
+        key: ${{ steps.cache.outputs.cache-primary-key }}
