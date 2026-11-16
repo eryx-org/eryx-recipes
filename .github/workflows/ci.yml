@@ -142,7 +142,9 @@ jobs:
       # fails here.
       - name: Write the notices
         run: |
-          if python3 scripts/notices.py published "$CLI"; then
+          # Not `if published`: a crash there must fail the step, not skip it.
+          published=$(python3 scripts/notices.py published "$CLI")
+          if [ "$published" = yes ]; then
             mise run notices -- "scratch/$CLI-component" "$CLI"
           fi
         env:
@@ -200,7 +202,9 @@ jobs:
       # fails here.
       - name: Write the notices
         run: |
-          if python3 scripts/notices.py published "$CLI"; then
+          # Not `if published`: a crash there must fail the step, not skip it.
+          published=$(python3 scripts/notices.py published "$CLI")
+          if [ "$published" = yes ]; then
             mise run notices -- "scratch/$CLI-component" "$CLI"
           fi
         env:

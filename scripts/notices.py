@@ -3,7 +3,7 @@
 
     scripts/notices.py generate OUTDIR NAME...   # write OUTDIR/<name>.notices.md
     scripts/notices.py check                     # what CI's check job runs
-    scripts/notices.py published NAME            # exit 0 if NAME is published
+    scripts/notices.py published NAME            # print yes or no
 
 A command's notices are the entries of third_party/manual.toml that list it
 (the tool, the libraries it links, and its toolchain's libc and runtime), and
@@ -364,6 +364,9 @@ def generate(outdir, names):
         if name not in PUBLISHED:
             sys.exit(f"{name} isn't published yet (UNPUBLISHED), so it has no complete notices")
         path = outdir / f"{name}.notices.md"
+        lang = manifest(name)["lang"]
+        if lang not in LANE_ENTRIES:
+            sys.exit(f"{name}: no notices for the {lang} lane (LANE_ENTRIES)")
         args = cli_about_args(name, required=True)
         if args is None:
             path.write_text("# Third-party notices\n")
@@ -421,7 +424,10 @@ def check_manual():
         for dep in m.get("deps", []):
             if not any(c.get("cli") == path and c.get("cli_dep") == dep["name"] for c in listing):
                 errors.append(f"{name}: no third_party/manual.toml entry for its dependency {dep['name']} ({path})")
-        for entry in LANE_ENTRIES.get(m["lang"], []):
+        if m["lang"] not in LANE_ENTRIES:
+            errors.append(f"{name}: no notices for the {m['lang']} lane (LANE_ENTRIES)")
+            continue
+        for entry in LANE_ENTRIES[m["lang"]]:
             if not any(c["name"] == entry for c in listing):
                 errors.append(f"{name}: the {m['lang']} lane's {entry!r} entry doesn't list it")
     return errors
@@ -433,7 +439,9 @@ def main():
             if failed := generate(Path(outdir), names):
                 sys.exit(f"cargo-about failed for {', '.join(failed)}; see its output above")
         case ["published", name]:
-            sys.exit(0 if name in PUBLISHED else 1)
+            if name not in COMMANDS:
+                sys.exit(f"unknown command {name}")
+            print("yes" if name in PUBLISHED else "no")
         case ["check"]:
             errors = check_manual()
             for e in errors:
