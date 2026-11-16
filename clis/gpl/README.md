@@ -1,7 +1,7 @@
 # GPL-licensed CLI recipes
 
 Recipes here build commands whose source is GPL-licensed, kept apart from the
-rest of `clis/` so a licence audit can tell them apart at a glance (#837).
+rest of `clis/` so a licence audit can tell them apart at a glance (eryx-org/eryx#837).
 
 - Each subdirectory is one command. Everything in it (the manifest, patches,
   shims and scripts) is under that command's licence, given in its

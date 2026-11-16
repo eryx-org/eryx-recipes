@@ -17,5 +17,5 @@ licence.
   loads it at run time, and it talks to eryx only through the
   `eryx:process/run` interface, as any command does.
 - **Open questions:** whether and how eryx ships GPL components at all
-  (artifacts, notices, an SBOM) is tracked in #837, and needs a licensing
+  (artifacts, notices, an SBOM) is tracked in eryx-org/eryx#837, and needs a licensing
   review before any release includes one.

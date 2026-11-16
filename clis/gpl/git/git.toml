@@ -4,14 +4,14 @@
 #
 # git is GPL-2.0-only, and so is everything in this directory (the patch, the
 # shims and this recipe): see NOTICE.md. The component is a separate artifact,
-# never linked into or embedded in eryx (#837).
+# never linked into or embedded in eryx (eryx-org/eryx#837).
 #
 # git can't fork or exec on WASI. git-wasi.patch gives run-command.c a backend
 # over eryx:process/run, so the subcommands git runs with no live pipe
 # (run_command) or with all their input up front (pipe_command) run through
 # the host: `stash`, `worktree add`, `gc` and the like work when the sandbox
 # registers git with `Command::allow_spawn`. Live pipes and start_async (C
-# git's transports, the pager) still fail with ENOSYS (#815).
+# git's transports, the pager) still fail with ENOSYS (eryx-org/eryx#815).
 
 name = "git"
 description = "git (C, Makefile; subcommands through eryx:process/run)"
@@ -46,7 +46,7 @@ make_targets = ["git"]
 vendor_patch = "clis/gpl/git/patches/patch-git.sh"
 shims = ["clis/gpl/git/shims/wasi-git-stubs.c"]
 # The run-command.c backend's eryx:process/run bindings.
-wit = { path = "crates/eryx-runtime/wit/deps/process.wit", world = "eryx:process/child" }
+wit = { path = "wit/process.wit", world = "eryx:process/child" }
 cflags = [
     "-O2",
     "-D_WASI_EMULATED_SIGNAL",

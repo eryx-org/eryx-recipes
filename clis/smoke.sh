@@ -2,7 +2,7 @@
 # Smoke-test a built CLI component under the wasmtime CLI, from the repo root:
 #   clis/smoke.sh <name>      (after `mise run build-cli -- <name>`)
 #
-# This only proves the component runs. Running commands inside eryx is #809.
+# This only proves the component runs. eryx's own tests run them inside eryx.
 set -euo pipefail
 
 NAME="${1:?Usage: clis/smoke.sh <name>}"
@@ -96,7 +96,7 @@ git)
     # git imports eryx:process/run, for the subcommands it runs itself, which
     # only eryx provides, so it can't run under the wasmtime CLI. Check its
     # shape here; the opt-in git_stash_runs_git_itself test in
-    # crates/eryx/tests/commands.rs runs it (ci.yml, from this artifact).
+    # eryx-org/eryx's crates/eryx/tests/commands.rs runs it.
     wit="$(wasm-tools component wit "$OUT/component.wasm")"
     expect "$wit" "import eryx:process/run@0.1.0;"
     expect "$wit" "export wasi:cli/run@0.2"

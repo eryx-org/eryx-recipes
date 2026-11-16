@@ -3,7 +3,7 @@
 # Built by `mise run build-cli -- jq`.
 #
 # This is upstream jq, alongside the `jaq` clone (clis/jaq.toml): jaq differs
-# from jq in ways scripts can hit (#866), so sandboxes that want jq's exact
+# from jq in ways scripts can hit (eryx-org/eryx#866), so sandboxes that want jq's exact
 # behaviour register this one as `jq`. Neither source needs patching.
 
 name = "jq"

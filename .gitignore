@@ -10,6 +10,7 @@
 !/clis/
 !/scripts/
 !/third_party/
+!/wit/
 
 # Never committed, even inside the directories above: build checkouts and
 # outputs, secrets and credentials, and agent session logs.

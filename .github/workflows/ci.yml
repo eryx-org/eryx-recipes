@@ -1,35 +1,24 @@
-# Build the CLI components in clis/*.toml with eryx-build and smoke-test each
-# one under the wasmtime CLI (clis/smoke.sh). Running them inside eryx is #809.
+# Build every command in clis/ with eryx-build (pinned in mise.toml) and
+# smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
 # Which lanes run when:
-# - Rust (coreutils, rg, sd, jaq) and C (sqlite3, curl, jq): when the driver,
-#   this workflow, mise.toml or one of the lane's manifests, patches or shims
-#   change.
-# - Go (gh): only when its manifest, patch, the Go-fork bootstrap or the Go lane
-#   itself change. It builds the wasip3 Go fork from source (cached), so it is
-#   the slow one.
+# - Rust (rg, sd, jaq) and C (sqlite3, curl, jq, git): when the build pins
+#   (mise.toml), this workflow, smoke.sh or one of the lane's manifests,
+#   patches, shims or WIT change.
+# - Go (gh): only when its manifest, patch or the Go-fork bootstrap change. It
+#   builds the wasip3 Go fork from source (cached), so it is the slow one.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
 #
 # Each component is uploaded as a workflow artifact with its manifest.toml and
-# provenance.json (see crates/eryx-build/src/provenance.rs), for testing and
-# for #809 to consume. Workflow artifacts are not a release channel.
+# provenance.json, for testing. Publishing to the registry is #5.
 
-name: CLI components
+name: CI
 
 on:
   push:
-    branches: [main, multi-guest]
-    paths: &paths
-      - 'clis/**'
-      - 'crates/eryx-build/**'
-      # git's eryx:process/run bindings are generated from it.
-      - 'crates/eryx-runtime/wit/deps/process.wit'
-      - 'scripts/bootstrap-go-wasip3.sh'
-      - 'mise.toml'
-      - '.github/workflows/clis.yml'
+    branches: [main]
   pull_request:
-    branches: [main, multi-guest]
-    paths: *paths
+    branches: [main]
   schedule:
     - cron: '23 6 * * 1' # Mondays
   workflow_dispatch: {}
@@ -48,7 +37,10 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    # A job's permissions replace the workflow's, and checkout needs contents
+    # in a private repo.
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
@@ -62,18 +54,17 @@ jobs:
         id: filter
         with:
           filters: |
+            # eryx-build, the toolchains and the WIT are pinned in mise.toml.
             driver: &driver
-              - 'crates/eryx-build/**'
               - 'clis/smoke.sh'
               - 'mise.toml'
-              - '.github/workflows/clis.yml'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             rust:
               - *driver
-              - 'clis/coreutils.toml'
               - 'clis/rg.toml'
               - 'clis/sd.toml'
               - 'clis/jaq.toml'
-              - 'clis/patches/patch-uucore-wasip2.sh'
               - 'clis/patches/patch-sd-wasip2.sh'
               - 'clis/patches/patch-jaq-wasip2.sh'
             c:
@@ -85,12 +76,14 @@ jobs:
               - 'clis/patches/patch-mbedtls.sh'
               - 'clis/shims/**'
               - 'clis/gpl/git/**'
-              - 'crates/eryx-runtime/wit/deps/process.wit'
+              # git's eryx:process/run bindings are generated from it.
+              - 'wit/**'
             go:
               - 'clis/gh.toml'
               - 'clis/patches/patch-gh-vendor.sh'
-              - 'crates/eryx-build/src/lanes/go.rs'
               - 'scripts/bootstrap-go-wasip3.sh'
+              # eryx-build's Go lane is pinned there.
+              - 'mise.toml'
 
   check:
     name: Check manifests
@@ -105,8 +98,10 @@ jobs:
           version: 2026.11.8
           install_args: rust
           cache: false
-      - run: cargo test -p eryx-build
-      - run: cargo run -q -p eryx-build -- --check
+      - uses: ./.github/actions/eryx-build
+      - run: mise run check-clis
+      # The vendored eryx WIT matches eryx's at the pinned commit.
+      - run: mise run check-wit
 
   rust:
     name: Build ${{ matrix.cli }} (Rust lane)
@@ -116,7 +111,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cli: [coreutils, rg, sd, jaq]
+        cli: [rg, sd, jaq]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,6 +122,7 @@ jobs:
           version: 2026.11.8
           install_args: rust aqua:bytecodealliance/wasmtime
           cache: false
+      - uses: ./.github/actions/eryx-build
       - run: rustup target add wasm32-wasip2
       - run: mise run build-cli -- "$CLI"
         env:
@@ -155,7 +151,7 @@ jobs:
       matrix:
         cli: [sqlite3, curl, jq, git]
         include:
-          # GPL recipes live apart, in clis/gpl/ (#837).
+          # GPL recipes live apart, in clis/gpl/ (eryx-org/eryx#837).
           - cli: git
             manifest: clis/gpl/git/git.toml
     steps:
@@ -169,9 +165,10 @@ jobs:
           # wit-bindgen for git's bindings, wasm-tools for its smoke check.
           install_args: rust aqua:bytecodealliance/wasmtime github:bytecodealliance/wit-bindgen cargo:wasm-tools
           cache: false
+      - uses: ./.github/actions/eryx-build
       # The CMake builds use Ninja, which the runner doesn't ship.
       - run: sudo apt-get update && sudo apt-get install -y ninja-build
-      # Every C build links the rustc-built start-in-$PWD object (#978).
+      # Every C build links the rustc-built start-in-$PWD object (eryx-org/eryx#978).
       - run: rustup target add wasm32-wasip2
       - run: mise run ensure-wasi-sdk
       - run: mise run build-cli -- "$MANIFEST"
@@ -180,7 +177,7 @@ jobs:
       - run: clis/smoke.sh "$CLI"
         env:
           CLI: ${{ matrix.cli }}
-      # A GPL component ships with its licence and our notice (#837).
+      # A GPL component ships with its licence and our notice (eryx-org/eryx#837).
       - name: Add git's licence and notice
         if: matrix.cli == 'git'
         run: cp scratch/git/COPYING clis/gpl/git/NOTICE.md scratch/git-component/
@@ -212,6 +209,7 @@ jobs:
           version: 2026.11.8
           install_args: rust cargo:wasm-tools aqua:bytecodealliance/wasmtime
           cache: false
+      - uses: ./.github/actions/eryx-build
       # Building the fork from source takes ~10 minutes; key it on the script,
       # which pins the fork's commit.
       - name: Cache wasip3 Go toolchain
@@ -230,10 +228,10 @@ jobs:
           export GOROOT_BOOTSTRAP
           GOROOT="$(scripts/bootstrap-go-wasip3.sh scratch/go-wasip3)"
           echo "ERYX_GO_WASIP3_ROOT=$GOROOT" >> "$GITHUB_ENV"
-      # Pushes to main and multi-guest save; PRs and the weekly run only
-      # restore (a PR's caches are scoped to it, and would only evict main's).
+      # Pushes to main save; PRs and the weekly run only restore (a PR's
+      # caches are scoped to it, and would only evict main's).
       - name: Save wasip3 Go toolchain
-        if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/multi-guest') && github.event_name == 'push' && steps.go-wasip3-cache.outputs.cache-hit != 'true' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.go-wasip3-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: scratch/go-wasip3
