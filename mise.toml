@@ -1,0 +1,30 @@
+# Toolchains and tools for building and publishing the command components.
+# eryx-build itself is pinned here once it's published to crates.io
+# (eryx-org/eryx#997).
+
+[tools]
+rust = { version = "1.100.0", profile = "default" }
+# Workflow linting. actionlint runs shellcheck over every `run:` script when
+# it finds it on PATH, so pin that too.
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+
+# Runs the commands' smoke tests, and precompiles those built as cwasm. Keep
+# it on the wasmtime version eryx uses, since a cwasm only loads in the
+# wasmtime that built it.
+[tools."aqua:bytecodealliance/wasmtime"]
+version = "50.0.1"
+
+# `wit-bindgen c`, for C recipes with a `[build] wit` (git's eryx:process
+# bindings). The same version as eryx's guests use.
+[tools."github:bytecodealliance/wit-bindgen"]
+version = "0.63.0"
+
+# The commands' third-party notices. 0.9 knows wasm32-wasip3.
+[tools."cargo:cargo-about"]
+version = "0.9.3"
+
+# The WASI SDK isn't in [tools]: on PATH it breaks host compilation (Rust
+# picks up wasm clang for proc-macro builds), so builds install it on demand.
+[vars]
+wasi_sdk_version = "wasi-sdk-33"
