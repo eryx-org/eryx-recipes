@@ -22,6 +22,11 @@
     publish.py lock --results RESULTS.json [--lock commands.lock]
         Add the results' versions to a lock file in wkg.lock's format.
 
+    publish.py bump NAMESPACE:NAME [--branch BRANCH]
+        For a recipe fetched from eryx (`fetched` in commands.toml): move its
+        pin to the newest commit on BRANCH that changed the recipe or its
+        vendor patch, and bump its version (back to r.1 for a new upstream).
+
 Nothing in an OCI registry stops a tag being pushed again: immutability rests
 on the check before each push, and on publishes never running concurrently
 (CI's publish concurrency group).
@@ -51,6 +56,7 @@ COMMANDS = "commands.toml"
 LOCK = "commands.lock"
 REPOSITORY_PREFIX = "eryx-org/commands"
 SOURCE_URL = "https://github.com/eryx-org/eryx-commands"
+ERYX_URL = "https://github.com/eryx-org/eryx"
 # `<MAJOR.MINOR.PATCH>-r.<n>`: semver, with the revision as a prerelease
 # whose numeric part compares numerically (`-r.2 < -r.10`), as wkg needs.
 VERSION = re.compile(
@@ -180,6 +186,22 @@ def pin_values(mise: dict, pins: list) -> list:
     return [mise.get(table, {}).get(key) for table, key in pins]
 
 
+def multicall_names(manifest: dict) -> list[str]:
+    """A multicall command's names: the cargo features its manifest builds
+    (`--features a,b,c`), one per tool."""
+    flags = manifest.get("build", {}).get("cargo_flags", [])
+    if "--features" not in flags or flags.index("--features") + 1 == len(flags):
+        raise Error(f"{manifest['name']}: multicall, but its cargo_flags have no `--features` list")
+    return flags[flags.index("--features") + 1].split(",")
+
+
+def recipe_url(mise: dict, entry: dict, rel: str) -> str | None:
+    """Where a recipe fetched from eryx comes from, pinned."""
+    if "fetched" not in entry:
+        return None
+    return f"{ERYX_URL}/blob/{mise['vars'][entry['fetched']]}/{rel}"
+
+
 def check_versions(root: Path, base: str | None) -> list[str]:
     """Problems with commands.toml, as messages (none when it's fine)."""
     problems = []
@@ -200,10 +222,28 @@ def check_versions(root: Path, base: str | None) -> list[str]:
     for key, entry in sorted(commands.items()):
         label = f"{key[0]}:{key[1]}"
         rel = manifest_path(key, entry)
-        if not (root / rel).is_file():
-            problems.append(f"{label}: its manifest {rel} doesn't exist")
+        if "fetched" in entry and entry["fetched"] not in mise.get("vars", {}):
+            problems.append(f"{label}: fetched at vars.{entry['fetched']}, which mise.toml doesn't set")
             continue
+        if not (root / rel).is_file():
+            hint = f" (run `mise run fetch-{key[1]}`)" if "fetched" in entry else ""
+            problems.append(f"{label}: its manifest {rel} doesn't exist{hint}")
+            continue
+        if "fetched" in entry:
+            stamp = root / "scratch" / "fetched" / entry["fetched"]
+            fetched = stamp.read_text().strip() if stamp.exists() else None
+            if fetched != mise["vars"][entry["fetched"]]:
+                problems.append(
+                    f"{label}: {rel} was fetched at {fetched or 'an unknown commit'}, not "
+                    f"vars.{entry['fetched']}; run `mise run fetch-{key[1]}`"
+                )
+                continue
         manifest = tomllib.loads((root / rel).read_text())
+        if entry.get("multicall"):
+            try:
+                multicall_names(manifest)
+            except Error as e:
+                problems.append(f"{label}: {e}")
         try:
             upstream, revision = parse_version(entry.get("version", ""))
         except Error as e:
@@ -238,12 +278,15 @@ def check_versions(root: Path, base: str | None) -> list[str]:
         if old_upstream != upstream and revision != 1:
             problems.append(f"{label}: a new upstream version starts at r.1, not r.{revision}")
         paths, pins = build_inputs(root, rel, manifest)
+        # A fetched recipe isn't in git, so its pin stands for it.
+        if "fetched" in entry:
+            pins = pins + [("vars", entry["fetched"])]
         touched = sorted(
             path for path in changed
             if any(path == i or path.startswith(i + "/") for i in paths)
         )
         if pin_values(base_mise, pins) != pin_values(mise, pins):
-            touched.append("mise.toml (a pinned toolchain)")
+            touched.append("mise.toml (a pinned toolchain or recipe)")
         if touched and old["version"] == entry["version"]:
             problems.append(
                 f"{label}: {', '.join(touched)} changed, so its version "
@@ -407,7 +450,8 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
     for key in commands:
         by_name.setdefault(key[1], []).append(key)
     revision = (git(ROOT, "rev-parse", "HEAD") or "").strip()
-    eryx_rev = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["eryx_rev"]
+    mise = tomllib.loads((ROOT / "mise.toml").read_text())
+    eryx_rev = mise["vars"]["eryx_rev"]
     created = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     results = []
@@ -419,6 +463,9 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
             raise Error(f"{directory}: {name!r} names {len(keys)} entries in {COMMANDS}")
         key = keys[0]
         entry = commands[key]
+        if entry.get("multicall"):
+            manifest = tomllib.loads((directory / "manifest.toml").read_text())
+            entry = {**entry, "names": multicall_names(manifest)}
         repository = f"{REPOSITORY_PREFIX}/{key[0]}/{key[1]}"
         reference = f"{registry.host}/{repository}:{entry['version']}"
         component = directory / "component.wasm"
@@ -441,7 +488,10 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
             command = ["wkg", "oci", "push"]
             if registry.base.startswith("http:"):
                 command += ["--insecure", registry.host]
-            for k, v in annotations(provenance, entry, key, revision, created, eryx_rev).items():
+            notes = annotations(provenance, entry, key, revision, created, eryx_rev)
+            if recipe := recipe_url(mise, entry, manifest_path(key, entry)):
+                notes["run.eryx.command.recipe"] = recipe
+            for k, v in notes.items():
                 command += ["--annotation", f"{k}={v}"]
             command += [reference, str(component)]
             subprocess.run(command, check=True)
@@ -523,6 +573,85 @@ def lock(results: list[dict], lock_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Moving a fetched recipe's pin
+# ---------------------------------------------------------------------------
+
+
+def raw_eryx(rev: str, path: str) -> str:
+    url = f"https://raw.githubusercontent.com/eryx-org/eryx/{rev}/{path}"
+    try:
+        return urllib.request.urlopen(url).read().decode()
+    except urllib.error.HTTPError as e:
+        raise Error(f"{url}: HTTP {e.code}") from e
+
+
+def newest_commit(branch: str, paths: list[str]) -> str:
+    """The newest commit on eryx's `branch` that changed any of `paths`."""
+    newest = None
+    for path in paths:
+        url = f"https://api.github.com/repos/eryx-org/eryx/commits?sha={branch}&path={path}&per_page=1"
+        commits = json.load(urllib.request.urlopen(url))
+        if not commits:
+            raise Error(f"no commit on eryx's {branch} changed {path}")
+        date = commits[0]["commit"]["committer"]["date"]
+        if newest is None or date > newest[0]:
+            newest = (date, commits[0]["sha"])
+    return newest[1]
+
+
+def bumped(version: str, upstream: str) -> str:
+    old_upstream, revision = parse_version(version)
+    return f"{upstream}-r.1" if upstream != old_upstream else f"{upstream}-r.{revision + 1}"
+
+
+def replace_once(text: str, pattern: str, replacement: str, what: str) -> str:
+    new, count = re.subn(pattern, replacement, text, count=1, flags=re.M)
+    if count != 1:
+        raise Error(f"couldn't find {what}")
+    return new
+
+
+def set_version(text: str, key: tuple[str, str], version: str) -> str:
+    """commands.toml's text with `key`'s version replaced."""
+    table = rf'^(\[{re.escape(key[0])}\.{re.escape(key[1])}\]\n(?:(?!\[).*\n)*?)version = "[^"]*"'
+    return replace_once(text, table, rf'\g<1>version = "{version}"', f"{key[0]}:{key[1]}'s version in {COMMANDS}")
+
+
+def bump(root: Path, name: str, branch: str) -> None:
+    namespace, _, short = name.partition(":")
+    key = (namespace, short)
+    commands = load_commands((root / COMMANDS).read_text())
+    entry = commands.get(key)
+    if not entry or "fetched" not in entry:
+        raise Error(f"{name} isn't a recipe fetched from eryx in {COMMANDS}")
+    var = entry["fetched"]
+    mise_text = (root / "mise.toml").read_text()
+    current = tomllib.loads(mise_text)["vars"][var]
+
+    rel = manifest_path(key, entry)
+    manifest = tomllib.loads(raw_eryx(branch, rel))
+    paths = [rel] + strings(manifest.get("build", {}).get("vendor_patch", []))
+    rev = newest_commit(branch, paths)
+    if rev == current:
+        print(f"{name}: already at {rev}, the newest change on {branch}", file=sys.stderr)
+        return
+    url = f"https://api.github.com/repos/eryx-org/eryx/compare/{current}...{rev}"
+    if json.load(urllib.request.urlopen(url))["status"] != "ahead":
+        raise Error(f"{rev[:12]}, {branch}'s newest change to {rel}, doesn't follow the pin {current[:12]}")
+    manifest = tomllib.loads(raw_eryx(rev, rel))
+    upstream = entry.get("upstream", upstream_from_ref(short, manifest["source"]["ref"]))
+    version = bumped(entry["version"], upstream)
+
+    (root / "mise.toml").write_text(replace_once(
+        mise_text, rf'^{re.escape(var)} = "[0-9a-f]+"', f'{var} = "{rev}"', f"vars.{var} in mise.toml"))
+    (root / COMMANDS).write_text(set_version((root / COMMANDS).read_text(), key, version))
+    print(f"{name}: {current[:12]} -> {rev[:12]}, {entry['version']} -> {version}", file=sys.stderr)
+    if version.endswith("-r.1"):
+        print(f"{name}: a new upstream version: update its third_party/manual.toml entry "
+              "(version, url, cli_commit) and licence file by hand", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 
 
 def main() -> int:
@@ -539,6 +668,9 @@ def main() -> int:
     locking = sub.add_parser("lock")
     locking.add_argument("--results", type=Path, required=True)
     locking.add_argument("--lock", type=Path, default=ROOT / LOCK)
+    bumping = sub.add_parser("bump")
+    bumping.add_argument("name")
+    bumping.add_argument("--branch", default="multi-guest")
     args = parser.parse_args()
 
     try:
@@ -556,9 +688,12 @@ def main() -> int:
             if not args.out:
                 sys.stdout.write(json.dumps(results, indent=2) + "\n")
             return 0
+        if args.command == "bump":
+            bump(ROOT, args.name, args.branch)
+            return 0
         lock(json.loads(args.results.read_text()), args.lock)
         return 0
-    except (Error, subprocess.CalledProcessError) as e:
+    except (Error, subprocess.CalledProcessError, urllib.error.URLError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

@@ -19,6 +19,9 @@
 # outputs, secrets and credentials, and agent session logs.
 scratch/
 target/
+# Fetched from eryx-org/eryx at a pinned commit (mise run fetch-coreutils).
+/clis/coreutils.toml
+/clis/patches/patch-uucore-wasip2.sh
 .env
 .env.*
 !.env.example

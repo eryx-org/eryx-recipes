@@ -40,6 +40,17 @@ cli = "clis/rg.toml"
 cli_commit = "af60c2de9d85e7f3d81c78601669468cf02dabab"
 
 [[component]]
+name = "uutils coreutils"
+version = "0.9.0 (840c36d3)"
+license = "MIT"
+url = "https://github.com/uutils/coreutils/tree/840c36d3964833e1dc107fcb9ade9c0ad63076c0"
+files = ["third_party/licenses/coreutils-LICENSE"]
+artifacts = ["coreutils"]
+# Fetched from eryx-org/eryx (mise run fetch-coreutils).
+cli = "clis/coreutils.toml"
+cli_commit = "840c36d3964833e1dc107fcb9ade9c0ad63076c0"
+
+[[component]]
 name = "sd"
 version = "1.1.0 (4a7b2165)"
 license = "MIT"
@@ -220,7 +231,7 @@ files = [
 ]
 rust_toolchain = "1.100.0"
 sysroot_strings = { paths = ["lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a"], strings = ["llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141"] }
-artifacts = ["rg", "sd", "jaq"]
+artifacts = ["rg", "sd", "jaq", "coreutils"]
 
 [[component]]
 name = "The Rust standard library"
@@ -239,7 +250,7 @@ files = [
     "third_party/licenses/rust-Unicode-3.0.txt",
 ]
 rust_toolchain = "1.100.0"
-artifacts = ["rg", "sd", "jaq"]
+artifacts = ["rg", "sd", "jaq", "coreutils"]
 
 [[component]]
 name = "The Go standard library (wasip3 fork)"
