@@ -5,7 +5,7 @@ Command components for [eryx](https://github.com/eryx-org/eryx) shell sandboxes:
 - **Recipes** (`clis/*.toml`): one per command. Each pins the upstream source and its patches, and is built by [eryx-build](https://github.com/eryx-org/eryx/tree/multi-guest/crates/eryx-build). GPL recipes live apart, in `clis/gpl/`. coreutils' recipe isn't kept here: eryx builds the same coreutils for its embedded commands, so `mise run fetch-coreutils` fetches `clis/coreutils.toml` and its uucore patch from eryx at `vars.coreutils_rev`, and `mise run bump-coreutils [-- BRANCH]` moves that pin (and the version) to the branch's newest change to them. A new upstream coreutils version also needs `third_party/manual.toml`'s uutils entry (`version`, `url`, `cli_commit`) and `third_party/licenses/coreutils-LICENSE` updated by hand; `mise run notices-check` fails until they are. check-clis and check-versions fail if the fetched copy isn't the pinned one.
 - **Registry:** `ghcr.io/eryx-org/commands/<namespace>/<name>:<upstream>-r.<n>`. That's `eryx:<name>` for permissively licensed commands and `eryx-gpl:<name>` for GPL ones. The layout and metadata follow [wkg](https://github.com/bytecodealliance/wasm-pkg-tools)'s conventions, so `wkg` can fetch them.
 - **Versions:** each published version is immutable. `<upstream>-r.<n>` is the upstream release plus our build revision, which bumps whenever the binary changes. There are no floating tags.
-- **Notices:** each command ships its third-party notices (the tool, what it links, its crates or modules) and is signed with its provenance.
+- **Notices:** each command ships its third-party notices (the tool, what it links, its crates or modules) and is signed with its provenance (see [Signatures and referrers](#signatures-and-referrers)).
 
 The design and decisions are in [#1](https://github.com/eryx-org/eryx-commands/issues/1).
 
@@ -71,6 +71,36 @@ eryx-gpl = { registry = "eryx", metadata = { preferredProtocol = "oci", oci = { 
 ```
 
 Then run `wkg get eryx:sd@1.1.0-r.1`. The packages are private for now, so wkg needs credentials, such as `docker login ghcr.io`.
+
+## Signatures and referrers
+
+After a real publish, the sign job (`scripts/sign.py`) attaches these to each command's manifest, by digest, as OCI referrers:
+
+| Referrer | |
+|---|---|
+| a cosign signature | keyless: a Fulcio certificate for this repo's publish workflow on `main` |
+| a SLSA v1 provenance attestation (`https://slsa.dev/provenance/v1`) | the workflow run, this repo's commit, and the upstream source and patches from `provenance.json` |
+| `application/vnd.eryx.notices.v1+markdown` | the command's third-party notices |
+| `application/vnd.eryx.source-offer.v1+json` | GPL commands only: the complete corresponding source, next to the binary. Its layers are `<name>-recipe.tar.gz` (every build input from this repo at the published commit: the recipe, patches, shims and WIT, plus `BUILD-INPUTS.json` with the tool pins such as `eryx_rev` and the WASI SDK) and the upstream sources at their pins (the tool's own tree at its commit, and each statically linked dependency's archive). Its config lists all of them with their digests. |
+
+cosign 3 stores signatures and attestations as Sigstore bundles in referrers too; on a registry without the referrers API they're listed under the `sha256-<digest>` tag. The job skips whatever's already attached, so a re-run finishes a failed one without duplicates. It only signs a manifest (by digest) whose layer is this run's `component.wasm` and, if publish found it already there, whose revision is a commit of `main`. A version that was already in the registry with another layer (a full re-run rebuilds, and builds aren't guaranteed to be reproducible) is left unsigned and listed in the job summary; re-run only the failed jobs, which reuse the original build, or publish a new version. The dry run signs and attaches the same way, to its throwaway registry, with a key made for the run.
+
+To verify a command:
+
+```sh
+ref=ghcr.io/eryx-org/commands/eryx/sd@sha256:...
+id=https://github.com/eryx-org/eryx-commands/.github/workflows/ci.yml@refs/heads/main
+issuer=https://token.actions.githubusercontent.com
+cosign verify --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
+cosign verify-attestation --type slsaprovenance1 \
+  --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
+oras discover "$ref"   # the notices and source offer
+```
+
+The workflow's `tlog_upload` input (on by default) says whether signing records the signatures in Sigstore's public transparency log, Rekor:
+
+- **On:** the log entry proves when the short-lived certificate signed, and anyone can see every signing made with this repo's identity. The entries are public: the certificate (naming this repo, the workflow and the commit) and each command's digest, and possibly the provenance attestation itself. Verify as above.
+- **Off:** nothing goes to the log. A Sigstore timestamp authority countersigns instead, which still proves the signing time, but nothing makes a signing public, so a stolen workflow identity could sign without anyone seeing it. Verify with `--insecure-ignore-tlog` added to both cosign commands.
 
 ## Licence
 
