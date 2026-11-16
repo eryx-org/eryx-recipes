@@ -18,6 +18,19 @@
 #   `clis/gpl/<name>/<name>.toml` for `eryx-gpl`).
 # - `names` (optional): every name a multicall command answers to, recorded in
 #   its `run.eryx.command.names` annotation.
+# - `multicall` (optional): `true` takes `names` from the manifest's cargo
+#   `--features` list instead, one tool per feature.
+# - `fetched` (optional): the recipe isn't kept here but fetched from
+#   eryx-org/eryx at the commit in this mise.toml var (`mise run
+#   fetch-<name>`; `mise run bump-<name>` moves it). Moving the pin counts as a
+#   change to the command's build inputs.
+
+# The same build as eryx's embedded coreutils, from eryx's recipe
+# (eryx-commands#7).
+[eryx.coreutils]
+version = "0.9.0-r.1"
+multicall = true
+fetched = "coreutils_rev"
 
 [eryx.curl]
 version = "8.20.0-r.1"

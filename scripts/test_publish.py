@@ -82,6 +82,36 @@ class Annotations(unittest.TestCase):
                 publish.annotations(provenance, {"version": "1.0.0-r.1"}, ("eryx", "y"), "r", "t", "e")
 
 
+class Fetched(unittest.TestCase):
+    def test_multicall_names_are_the_features(self):
+        manifest = {"name": "coreutils", "build": {"cargo_flags": ["--no-default-features", "--features", "cat,ls"]}}
+        self.assertEqual(publish.multicall_names(manifest), ["cat", "ls"])
+        for flags in [[], ["--features"]]:
+            with self.assertRaises(publish.Error):
+                publish.multicall_names({"name": "x", "build": {"cargo_flags": flags}})
+
+    def test_bumped(self):
+        self.assertEqual(publish.bumped("0.9.0-r.3", "0.9.0"), "0.9.0-r.4")
+        self.assertEqual(publish.bumped("0.9.0-r.3", "0.10.0"), "0.10.0-r.1")
+
+    def test_set_version_touches_only_that_entry(self):
+        text = '[eryx.a]\nversion = "1.0.0-r.1"\n\n[eryx.b]\nmulticall = true\nversion = "2.0.0-r.1"\n'
+        self.assertEqual(
+            publish.set_version(text, ("eryx", "b"), "2.0.0-r.2"),
+            '[eryx.a]\nversion = "1.0.0-r.1"\n\n[eryx.b]\nmulticall = true\nversion = "2.0.0-r.2"\n',
+        )
+        with self.assertRaises(publish.Error):
+            publish.set_version(text, ("eryx", "c"), "3.0.0-r.1")
+
+    def test_recipe_url(self):
+        mise = {"vars": {"coreutils_rev": "abc"}}
+        self.assertEqual(
+            publish.recipe_url(mise, {"fetched": "coreutils_rev"}, "clis/coreutils.toml"),
+            "https://github.com/eryx-org/eryx/blob/abc/clis/coreutils.toml",
+        )
+        self.assertIsNone(publish.recipe_url(mise, {}, "clis/rg.toml"))
+
+
 class FakeRegistry:
     """A registry that already has some versions."""
 
@@ -308,6 +338,33 @@ class CheckVersions(unittest.TestCase):
         self.set_version("sd", "1.1.0-r.3")
         self.commit()
         self.assertEqual(self.problems(), [])
+
+    def test_moving_a_fetched_recipes_pin_needs_a_new_revision(self):
+        # The fetched recipe is git-ignored, so only the pin shows the change.
+        self.write(".gitignore", "/clis/coreutils.toml\n")
+        self.write("clis/coreutils.toml", 'name = "coreutils"\nlicense = "MIT"\nlang = "rust"\n'
+                   '[source]\nref = "0.9.0"\n[build]\ncargo_flags = ["--features", "cat"]\n')
+        mise = (self.MISE % "aaa").replace("wasi_sdk_version", 'coreutils_rev = "c1", wasi_sdk_version')
+        self.write("mise.toml", mise)
+        text = (self.root / "commands.toml").read_text()
+        self.write("commands.toml", text + '[eryx.coreutils]\nversion = "0.9.0-r.1"\n'
+                   'multicall = true\nfetched = "coreutils_rev"\n')
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.assertEqual(self.problems(), [])
+
+        self.write("mise.toml", mise.replace('"c1"', '"c2"'))
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("eryx:coreutils", problem)
+        self.set_version("coreutils", "0.9.0-r.2")
+        self.commit()
+        self.assertEqual(self.problems(), [])
+
+        # Unfetched, it says how to fetch it.
+        (self.root / "clis/coreutils.toml").unlink()
+        [problem] = publish.check_versions(self.root, None)
+        self.assertIn("mise run fetch-coreutils", problem)
 
     def test_versions_must_match_the_manifest_and_cover_every_recipe(self):
         self.set_version("curl", "8.21.0-r.1")

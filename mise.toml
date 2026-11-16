@@ -42,6 +42,10 @@ wasi_sdk_version = "wasi-sdk-33"
 # at least eryx-org/eryx#1004, whose provenance.json records the eryx-build
 # version and the WIT imports the registry annotations come from.
 eryx_rev = "2f605599fc5084ae4c1586466e6facbdcab3d662"
+# The eryx commit coreutils' recipe (clis/coreutils.toml and its uucore patch)
+# is fetched from: eryx keeps building it for its embedded coreutils, and we
+# publish the same build. `mise run bump-coreutils` moves it.
+coreutils_rev = "d1f8b9e19abb524fbf5bb49e8f8cda2ce8ebac38"
 # google/licenseclassifier's identify_license, which classifies a Go
 # command's module licence files for its notices. Installed with the host
 # Go into scratch/tools, like eryx-build.
@@ -132,3 +136,23 @@ run = "python3 scripts/notices.py generate"
 description = "Check every published command, its [[deps]] and its lane's libraries have current notice entries"
 depends = ["ensure-rust-src"]
 run = "python3 scripts/notices.py check"
+
+[tasks.fetch-coreutils]
+description = "Fetch coreutils' recipe from eryx-org/eryx at vars.coreutils_rev into clis/ (git-ignored)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for f in clis/coreutils.toml clis/patches/patch-uucore-wasip2.sh; do
+    curl -fsSL -o "$f" "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.coreutils_rev}}/$f"
+done
+chmod +x clis/patches/patch-uucore-wasip2.sh
+"""
+
+[tasks.bump-coreutils]
+description = "Move vars.coreutils_rev to the newest eryx commit that changed coreutils' recipe, and bump its version. Usage: mise run bump-coreutils [-- BRANCH] (default multi-guest)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+python3 scripts/publish.py bump eryx:coreutils --branch "${1:-multi-guest}"
+mise run fetch-coreutils
+"""

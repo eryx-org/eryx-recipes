@@ -2,9 +2,9 @@
 # smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
 # Which lanes run when:
-# - Rust (rg, sd, jaq) and C (sqlite3, curl, jq, git): when the build pins
-#   (mise.toml), this workflow, smoke.sh or one of the lane's manifests,
-#   patches, shims or WIT change.
+# - Rust (rg, sd, jaq, and coreutils from eryx's recipe) and C (sqlite3, curl,
+#   jq, git): when the build pins (mise.toml), this workflow, smoke.sh or one
+#   of the lane's manifests, patches, shims or WIT change.
 # - Go (gh): only when its manifest, patch or the Go-fork bootstrap change. It
 #   builds the wasip3 Go fork from source (cached), so it is the slow one.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
@@ -124,6 +124,8 @@ jobs:
           install_args: rust
           cache: false
       - uses: ./.github/actions/eryx-build
+      # coreutils' recipe comes from eryx at vars.coreutils_rev (#7).
+      - run: mise run fetch-coreutils
       - run: mise run check-clis
       # Every published command has its notice entries, and they're current.
       - run: mise run notices-check
@@ -145,7 +147,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cli: [rg, sd, jaq]
+        # coreutils is built from eryx's recipe, fetched at vars.coreutils_rev
+        # in mise.toml (so the driver filter covers its pin).
+        cli: [rg, sd, jaq, coreutils]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -159,6 +163,8 @@ jobs:
           cache: false
       - uses: ./.github/actions/eryx-build
       - run: rustup target add wasm32-wasip2
+      - if: matrix.cli == 'coreutils'
+        run: mise run fetch-coreutils
       - run: mise run build-cli -- "$CLI"
         env:
           CLI: ${{ matrix.cli }}
