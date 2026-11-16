@@ -1,0 +1,253 @@
+# Third-party code in the published command components, listed in their
+# notices by scripts/notices.py: each command's own source and what it
+# statically links, and each lane's toolchain libraries. A Rust command's
+# crates (and its standard library's) come from cargo-about instead.
+#
+# Each entry:
+#   name, version, license (SPDX), url  - what it is
+#   files     - licence and notice texts, relative to the repo root, copied
+#               from the source at its pin
+#   artifacts - the commands (manifest names) whose notices it goes in
+#   cli, cli_commit / cli_sha256 - the manifest that builds it and its pin,
+#               which `check` compares; cli_dep names one of its [[deps]]
+#   rust_toolchain - code that comes with the Rust toolchain: the version,
+#               which must be mise.toml's [tools] rust
+#   sysroot_strings - strings that must appear in files of that toolchain's
+#               sysroot, as { paths, strings }, so the version recorded here
+#               is the one it ships
+#   wasi_sdk  - code from the WASI SDK: the version, which must be
+#               mise.toml's wasi_sdk_version
+#   go_fork_commit - code from the wasip3 Go fork: the commit, which must be
+#               the one scripts/bootstrap-go-wasip3.sh builds; the version
+#               must start with that script's GO_WASIP3_REF
+
+# ---------------------------------------------------------------------------
+# The commands and their [[deps]]
+# ---------------------------------------------------------------------------
+
+[[component]]
+name = "ripgrep"
+version = "15.1.0 (af60c2de)"
+license = "Unlicense OR MIT"
+url = "https://github.com/BurntSushi/ripgrep/tree/af60c2de9d85e7f3d81c78601669468cf02dabab"
+files = [
+    "third_party/licenses/ripgrep-COPYING",
+    "third_party/licenses/ripgrep-LICENSE-MIT",
+    "third_party/licenses/ripgrep-UNLICENSE",
+]
+artifacts = ["rg"]
+cli = "clis/rg.toml"
+cli_commit = "af60c2de9d85e7f3d81c78601669468cf02dabab"
+
+[[component]]
+name = "sd"
+version = "1.1.0 (4a7b2165)"
+license = "MIT"
+url = "https://github.com/chmln/sd/tree/4a7b216552d64134c0fa17a59b9d557d89019f0f"
+files = ["third_party/licenses/sd-LICENSE"]
+artifacts = ["sd"]
+cli = "clis/sd.toml"
+cli_commit = "4a7b216552d64134c0fa17a59b9d557d89019f0f"
+
+[[component]]
+name = "jaq"
+version = "3.1.2 (f7fea921)"
+license = "MIT"
+url = "https://github.com/01mf02/jaq/tree/f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"
+files = ["third_party/licenses/jaq-LICENSE-MIT"]
+artifacts = ["jaq"]
+cli = "clis/jaq.toml"
+cli_commit = "f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"
+
+[[component]]
+name = "jq"
+version = "1.8.2"
+# jq is MIT; its COPYING also covers the code it incorporates: David M. Gay's
+# dtoa, decNumber (ICU), Heimdal's thread and list code and NetBSD's strptime
+# (both BSD-2-Clause). Its documentation (CC BY 3.0) isn't built.
+license = "MIT AND ICU AND dtoa AND BSD-2-Clause"
+url = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-1.8.2.tar.gz"
+files = ["third_party/licenses/jq-COPYING"]
+artifacts = ["jq"]
+cli = "clis/jq.toml"
+cli_sha256 = "71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af"
+
+[[component]]
+name = "Oniguruma"
+version = "6.9.10"
+license = "BSD-2-Clause"
+url = "https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz"
+# jq's regex library, statically linked.
+files = ["third_party/licenses/oniguruma-COPYING"]
+artifacts = ["jq"]
+cli = "clis/jq.toml"
+cli_dep = "onig"
+cli_sha256 = "2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05"
+
+[[component]]
+name = "curl"
+version = "8.20.0 (a05f3497)"
+license = "curl"
+url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
+# Built with every optional library but mbedTLS off (clis/curl.toml).
+files = ["third_party/licenses/curl-COPYING"]
+artifacts = ["curl"]
+cli = "clis/curl.toml"
+cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
+
+[[component]]
+name = "Mbed TLS"
+version = "3.6.6"
+# Dual-licensed Apache-2.0 OR GPL-2.0-or-later; we take it under
+# Apache-2.0. Its LICENSE carries both texts.
+license = "Apache-2.0"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
+# curl's TLS library, statically linked.
+files = ["third_party/licenses/mbedtls-LICENSE"]
+artifacts = ["curl"]
+cli = "clis/curl.toml"
+cli_dep = "mbedtls"
+cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
+
+[[component]]
+name = "GitHub CLI"
+version = "2.87.3 (cf862d65)"
+license = "MIT"
+url = "https://github.com/cli/cli/tree/cf862d65df7f8ff528015e235c8cccd48cea286f"
+# Its Go modules are listed from its vendor tree (scripts/notices.py,
+# go_section), hashicorp/go-version (MPL-2.0, unmodified) among them.
+files = ["third_party/licenses/gh-LICENSE"]
+artifacts = ["gh"]
+cli = "clis/gh.toml"
+cli_commit = "cf862d65df7f8ff528015e235c8cccd48cea286f"
+
+[[component]]
+name = "SQLite"
+version = "3.53.2"
+# The amalgamation and its shell are public domain; this is the blessing
+# their source carries in place of a licence.
+license = "blessing"
+url = "https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip"
+files = ["third_party/licenses/sqlite-blessing.txt"]
+artifacts = ["sqlite3"]
+cli = "clis/sqlite3.toml"
+cli_sha256 = "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32"
+
+[[component]]
+name = "Git"
+version = "2.56.1 (03b41523)"
+# git is GPL-2.0-only. Parts of it are under other licences, each with its
+# file: xdiff and compat/regex (LGPL-2.1), reftable (BSD-3-Clause) and sha1dc
+# (MIT). The source offer for the binary is the published command's (#6).
+license = "GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT"
+url = "https://github.com/git/git/tree/03b41523c576f26ad34085378717a0c1b287470f"
+files = [
+    "third_party/licenses/git-COPYING",
+    "third_party/licenses/git-LGPL-2.1",
+    "third_party/licenses/git-reftable-LICENSE",
+    "third_party/licenses/git-sha1dc-LICENSE.txt",
+]
+artifacts = ["git"]
+cli = "clis/gpl/git/git.toml"
+cli_commit = "03b41523c576f26ad34085378717a0c1b287470f"
+
+[[component]]
+name = "zlib"
+version = "1.3.1"
+license = "Zlib"
+url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
+# git's compression library, statically linked.
+files = ["third_party/licenses/zlib-LICENSE"]
+artifacts = ["git"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "zlib"
+cli_sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+
+# ---------------------------------------------------------------------------
+# What each lane links (LANE_ENTRIES in scripts/notices.py)
+# ---------------------------------------------------------------------------
+
+[[component]]
+name = "wasi-libc (WASI SDK)"
+version = "wasi-sdk-33 (161b3195)"
+license = "Apache-2.0 WITH LLVM-exception AND Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND CC0-1.0"
+url = "https://github.com/WebAssembly/wasi-libc/tree/161b3195fc2558d2b1ba3eb9ffae3b2b47407623"
+# The C lane builds against the WASI SDK's sysroot. wasi-libc itself (its
+# LICENSE lists the parts it derives from), the musl code in it, cloudlibc
+# and musl-fts; dlmalloc is CC0. As eryx's entry for the same SDK.
+files = [
+    "third_party/licenses/wasi-libc-LICENSE",
+    "third_party/licenses/wasi-libc-LICENSE-APACHE-LLVM",
+    "third_party/licenses/wasi-libc-LICENSE-APACHE",
+    "third_party/licenses/wasi-libc-LICENSE-MIT",
+    "third_party/licenses/wasi-libc-musl-COPYRIGHT",
+    "third_party/licenses/wasi-libc-cloudlibc-LICENSE",
+    "third_party/licenses/wasi-libc-musl-fts-COPYING",
+]
+wasi_sdk = "wasi-sdk-33"
+artifacts = ["jq", "curl", "sqlite3", "git"]
+
+[[component]]
+name = "LLVM compiler-rt builtins (WASI SDK)"
+version = "wasi-sdk-33 (llvm-project 4434dabb)"
+license = "Apache-2.0 WITH LLVM-exception"
+url = "https://github.com/llvm/llvm-project/tree/4434dabb69916856b824f68a64b029c67175e532/compiler-rt"
+# clang links libclang_rt.builtins into every wasm program it builds.
+files = ["third_party/licenses/llvm-compiler-rt-LICENSE.TXT"]
+wasi_sdk = "wasi-sdk-33"
+artifacts = ["jq", "curl", "sqlite3", "git"]
+
+[[component]]
+name = "wasi-libc (Rust's wasm targets)"
+version = "wasi-sdk-34 (2e6fb9d8)"
+license = "Apache-2.0 WITH LLVM-exception AND Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND CC0-1.0"
+url = "https://github.com/WebAssembly/wasi-libc/tree/2e6fb9d8ee0cdf9e431fbcabe8af3115de000a13"
+# The wasi-libc in Rust's self-contained wasm32-wasip2 sysroot, which the
+# Rust lane links. Rust 1.100.0 builds that target with wasi-sdk-34
+# (src/ci/docker/host-x86_64/dist-various-2/Dockerfile at its tag), whose
+# src/wasi-libc is at the commit above; its libc.a reports clang
+# 23.1.0-wasi-sdk (llvm 895aa2c8). Only musl's COPYRIGHT differs from
+# wasi-sdk-33's. On a toolchain bump, look both up again; the check fails
+# when the sysroot's libc.a no longer carries that LLVM.
+files = [
+    "third_party/licenses/wasi-libc-LICENSE",
+    "third_party/licenses/wasi-libc-LICENSE-APACHE-LLVM",
+    "third_party/licenses/wasi-libc-LICENSE-APACHE",
+    "third_party/licenses/wasi-libc-LICENSE-MIT",
+    "third_party/licenses/wasi-libc-wasi-sdk-34-musl-COPYRIGHT",
+    "third_party/licenses/wasi-libc-cloudlibc-LICENSE",
+    "third_party/licenses/wasi-libc-musl-fts-COPYING",
+]
+rust_toolchain = "1.100.0"
+sysroot_strings = { paths = ["lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a"], strings = ["llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141"] }
+artifacts = ["rg", "sd", "jaq"]
+
+[[component]]
+name = "The Rust standard library"
+version = "1.100.0 (0ef1bc38)"
+license = "(MIT OR Apache-2.0) AND Unicode-3.0"
+url = "https://github.com/rust-lang/rust/tree/1.100.0"
+# The project's own licence texts for std, core, alloc and the rest of
+# library/, and Unicode-3.0 for core's Unicode tables
+# (library/core/src/unicode/unicode_data.rs, per the project's REUSE.toml);
+# their dependencies (hashbrown, compiler_builtins, ...) are listed from
+# rust-src.
+files = [
+    "third_party/licenses/rust-COPYRIGHT",
+    "third_party/licenses/rust-LICENSE-MIT",
+    "third_party/licenses/rust-LICENSE-APACHE",
+    "third_party/licenses/rust-Unicode-3.0.txt",
+]
+rust_toolchain = "1.100.0"
+artifacts = ["rg", "sd", "jaq"]
+
+[[component]]
+name = "The Go standard library (wasip3 fork)"
+version = "wasip3-0.3.0-go1.27.4 (dfb22bf4)"
+license = "BSD-3-Clause"
+url = "https://github.com/sd2k/go/tree/dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+# The Go lane's standard library and runtime: Go 1.27.4 ported to WASI 0.3
+# (scripts/bootstrap-go-wasip3.sh). Go's LICENSE and its patent grant.
+files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
+go_fork_commit = "dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+artifacts = ["gh"]

@@ -56,9 +56,13 @@ jobs:
       c: ${{ steps.filter.outputs.c }}
       go: ${{ steps.filter.outputs.go }}
     steps:
+      # On a push, paths-filter diffs against the push's before commit, and
+      # fetches it if it isn't here; without credentials that fetch fails in a
+      # private repo. Full history means it's always here. PRs use the API.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -69,6 +73,10 @@ jobs:
               - 'mise.toml'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              # What each command's notices are made from.
+              - 'scripts/notices.py'
+              - 'about.toml'
+              - 'third_party/**'
             rust:
               - *driver
               - 'clis/rg.toml'
@@ -93,6 +101,10 @@ jobs:
               - 'scripts/bootstrap-go-wasip3.sh'
               # eryx-build's Go lane is pinned there.
               - 'mise.toml'
+              # What its notices are made from.
+              - 'scripts/notices.py'
+              - 'about.toml'
+              - 'third_party/**'
 
   check:
     name: Check manifests
@@ -111,6 +123,8 @@ jobs:
           cache: false
       - uses: ./.github/actions/eryx-build
       - run: mise run check-clis
+      # Every published command has its notice entries, and they're current.
+      - run: mise run notices-check
       # The vendored eryx WIT matches eryx's at the pinned commit.
       - run: mise run check-wit
       - run: python3 -m unittest discover -s scripts
@@ -138,7 +152,8 @@ jobs:
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.11.8
-          install_args: rust aqua:bytecodealliance/wasmtime
+          # cargo-about for the notices.
+          install_args: rust aqua:bytecodealliance/wasmtime cargo:cargo-about
           cache: false
       - uses: ./.github/actions/eryx-build
       - run: rustup target add wasm32-wasip2
@@ -146,6 +161,18 @@ jobs:
         env:
           CLI: ${{ matrix.cli }}
       - run: clis/smoke.sh "$CLI"
+        env:
+          CLI: ${{ matrix.cli }}
+      # A published command's notices: its crates (Rust), what it links and
+      # its toolchain's libraries. A crate licence cargo-about won't accept
+      # fails here.
+      - name: Write the notices
+        run: |
+          # Not `if published`: a crash there must fail the step, not skip it.
+          published=$(python3 scripts/notices.py published "$CLI")
+          if [ "$published" = yes ]; then
+            mise run notices -- "scratch/$CLI-component" "$CLI"
+          fi
         env:
           CLI: ${{ matrix.cli }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -156,6 +183,7 @@ jobs:
             scratch/${{ matrix.cli }}-component/*.cwasm
             scratch/${{ matrix.cli }}-component/manifest.toml
             scratch/${{ matrix.cli }}-component/provenance.json
+            scratch/${{ matrix.cli }}-component/*.notices.md
           if-no-files-found: error
           retention-days: 14
 
@@ -195,6 +223,18 @@ jobs:
       - run: clis/smoke.sh "$CLI"
         env:
           CLI: ${{ matrix.cli }}
+      # A published command's notices: its crates (Rust), what it links and
+      # its toolchain's libraries. A crate licence cargo-about won't accept
+      # fails here.
+      - name: Write the notices
+        run: |
+          # Not `if published`: a crash there must fail the step, not skip it.
+          published=$(python3 scripts/notices.py published "$CLI")
+          if [ "$published" = yes ]; then
+            mise run notices -- "scratch/$CLI-component" "$CLI"
+          fi
+        env:
+          CLI: ${{ matrix.cli }}
       # A GPL component ships with its licence and our notice (eryx-org/eryx#837).
       - name: Add git's licence and notice
         if: matrix.cli == 'git'
@@ -207,6 +247,7 @@ jobs:
             scratch/${{ matrix.cli }}-component/*.cwasm
             scratch/${{ matrix.cli }}-component/manifest.toml
             scratch/${{ matrix.cli }}-component/provenance.json
+            scratch/${{ matrix.cli }}-component/*.notices.md
             scratch/${{ matrix.cli }}-component/COPYING
             scratch/${{ matrix.cli }}-component/NOTICE.md
           if-no-files-found: error
@@ -256,6 +297,11 @@ jobs:
           key: ${{ steps.go-wasip3-cache.outputs.cache-primary-key }}
       - run: mise run build-cli -- gh
       - run: clis/smoke.sh gh
+      # Its Go modules' licences, and the Go standard library's.
+      - name: Write the notices
+        run: |
+          mise run install-license-classifier
+          mise run notices -- scratch/gh-component gh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gh-component
@@ -264,6 +310,7 @@ jobs:
             scratch/gh-component/*.cwasm
             scratch/gh-component/manifest.toml
             scratch/gh-component/provenance.json
+            scratch/gh-component/gh.notices.md
           if-no-files-found: error
           retention-days: 14
 

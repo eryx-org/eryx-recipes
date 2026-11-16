@@ -18,6 +18,8 @@ clis/smoke.sh rg                  # run it under the wasmtime CLI
 mise run check-clis               # validate every manifest
 ```
 
+After a build, `mise run notices -- OUTDIR rg` writes the command's third-party notices (see `scripts/notices.py`), and `mise run notices-check` checks every published command's notice entries in `third_party/manual.toml`.
+
 `build-cli` installs eryx-build from eryx-org/eryx at `mise.toml`'s `eryx_rev` into `scratch/tools` the first time. C recipes need the WASI SDK (`mise run ensure-wasi-sdk`), and gh needs the wasip3 Go fork (`scripts/bootstrap-go-wasip3.sh`). Sources and outputs go in the git-ignored `scratch/`.
 
 ## Publishing
