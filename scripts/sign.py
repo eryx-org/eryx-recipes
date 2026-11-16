@@ -344,20 +344,32 @@ def sign_all(results: list[dict], dirs: list[Path], tools: Tools, env: dict,
         directory, provenance = components[name]
         ref = by_digest(result)
         built = "sha256:" + sha256_file(directory / "component.wasm")
-        if result["layer_digest"] != built:
-            # Already published (`pushed: false`) from another build: this
-            # run's notices, SBOM and provenance don't describe it either.
-            skipped.append(f"{result['name']} {result['version']} ({ref}): its layer is "
-                           f"{result['layer_digest']}, but this run built {built}, so it "
-                           "wasn't signed. Re-run the failed jobs of the run that published "
+        label = f"{result['name']} {result['version']} ({ref})"
+        # The manifest that's signed, by digest: its layer, not the results'
+        # (read by tag, so a tag moved in between would differ), must be
+        # this run's build. One already published from another build isn't
+        # described by this run's notices, SBOM or provenance either.
+        manifest = tools.manifest(ref)
+        layers = [layer["digest"] for layer in manifest.get("layers", [])]
+        if layers != [built]:
+            skipped.append(f"{label}: its layers are {layers}, but this run built {built}, so "
+                           "it wasn't signed. Re-run the failed jobs of the run that published "
                            "it (they reuse its build), or publish a new version.")
             continue
         # The commit the command was published from, which may be an
         # earlier run's when this one signs what that run pushed.
-        annotations = tools.manifest(ref).get("annotations", {})
-        revision = annotations.get("org.opencontainers.image.revision")
+        revision = manifest.get("annotations", {}).get("org.opencontainers.image.revision")
         if not revision:
             raise Error(f"{ref}: no org.opencontainers.image.revision annotation")
+        # One this run didn't push must name a commit of this branch, so a
+        # manifest pushed by something else, with a made-up revision, isn't
+        # signed.
+        if not result["pushed"] and subprocess.run(
+                ["git", "merge-base", "--is-ancestor", revision, "HEAD"], cwd=ROOT,
+                stderr=subprocess.DEVNULL).returncode != 0:
+            skipped.append(f"{label}: it was already in the registry, and its revision "
+                           f"{revision} isn't a commit of this branch, so it wasn't signed.")
+            continue
 
         if tools.signed(ref):
             print(f"{ref}: already signed", file=sys.stderr)

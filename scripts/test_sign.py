@@ -64,8 +64,15 @@ class Sign(unittest.TestCase):
         self.assertIn("vars.wasi_sdk_version", inputs["pins"])
         self.assertEqual(inputs["manifest"]["deps"][0]["name"], "zlib")
 
-    def test_a_layer_this_run_didnt_build_is_not_signed(self):
-        class NoTools:
+    def skipped(self, result, layers, revision):
+        """sign_all over one result whose manifest (by digest) has `layers`
+        and `revision`, with a tool set that fails on anything but reading
+        it: the messages for what it skipped."""
+        class ReadOnly:
+            def manifest(self, ref):
+                return {"layers": [{"digest": d} for d in layers],
+                        "annotations": {"org.opencontainers.image.revision": revision}}
+
             def __getattr__(self, name):
                 raise AssertionError(f"called {name}")
 
@@ -74,10 +81,24 @@ class Sign(unittest.TestCase):
             component.mkdir()
             (component / "component.wasm").write_bytes(b"this run's build")
             (component / "provenance.json").write_text(json.dumps(PROVENANCE))
-            already = {**RESULT, "pushed": False}
-            skipped = sign.sign_all([already], [component], NoTools(), ENV, Path(tmp))
-        self.assertEqual(len(skipped), 1)
-        self.assertIn("wasn't signed", skipped[0])
+            built = "sha256:" + sign.sha256_file(component / "component.wasm")
+            layers = [built if d == "built" else d for d in layers]
+            # The results say this run's build either way: only the
+            # manifest that would be signed counts.
+            return sign.sign_all([{**result, "layer_digest": built}], [component], ReadOnly(),
+                                 ENV, Path(tmp))
+
+    def test_a_manifest_without_this_runs_layer_is_not_signed(self):
+        [message] = self.skipped(RESULT, ["sha256:" + "c" * 64], "HEAD")
+        self.assertIn("wasn't signed", message)
+
+    def test_an_existing_manifest_needs_a_revision_on_this_branch(self):
+        [message] = self.skipped({**RESULT, "pushed": False}, ["built"], "0" * 40)
+        self.assertIn("isn't a commit of this branch", message)
+
+    def test_this_runs_build_at_a_commit_of_this_branch_is_signed(self):
+        with self.assertRaisesRegex(AssertionError, "called signed"):
+            self.skipped({**RESULT, "pushed": False}, ["built"], "HEAD")
 
 
 if __name__ == "__main__":
