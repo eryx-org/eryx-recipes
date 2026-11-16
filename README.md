@@ -26,10 +26,19 @@ After a build, `mise run notices -- OUTDIR rg` writes the command's third-party 
 
 Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its name (`[eryx.rg]` is `eryx:rg`).
 
-- **Bumping:** a PR that changes what a command is built from (its manifest, patches, shims, or the eryx-build, Rust, WASI SDK or Go-fork pins) must bump its `r.<n>`, and a new upstream version starts at `r.1`. `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR.
+- **Bumping:** a PR that changes what a command is built from must bump its `r.<n>`, and a new upstream version starts at `r.1`. What it's built from is:
+  - its manifest and everything in its own directory;
+  - the patches, shims and WIT it names, and the files its patch scripts apply;
+  - its lane's pins: eryx-build, Rust, the WASI SDK, wit-bindgen or the Go fork.
+
+  `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR. A version may never be lower than one `commands.lock` already has. Versions are `MAJOR.MINOR.PATCH-r.<n>`, as wkg needs semver.
 - **Dry run:** every CI run publishes what it built to a throwaway registry on the runner. It reads each push back, checks the layer against `component.wasm`, and uploads the would-be `commands.lock`.
-- **Real publish:** run the CI workflow by hand on `main` with `publish` set. After the dry run, and once the `ghcr-publish` environment approves, it pushes every built command whose version isn't in the registry yet to `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>`. Then it opens a PR that adds them to `commands.lock`.
-- **Versions are never replaced:** a version that's already published is skipped, and `--fail-existing` makes that an error.
+- **Real publish:** Ben runs the CI workflow by hand on `main` with `publish` set; the job only runs for that actor. After the dry run, it pushes every built command whose version isn't in the registry yet to `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>`. Then it opens a PR that adds them to `commands.lock`.
+  - On a private repo, a required reviewer on an environment needs a paid plan, so the actor check stands in for one until the repo is public.
+- **Versions are never replaced, by our own rules.** ghcr doesn't stop a tag being pushed again. publish.py checks each tag first and never pushes one that exists, and real publishes run one at a time (a concurrency group that's never cancelled), so nothing races that check.
+  - A version that's already there is listed in the results with the registry's digests, so `lock` and signing pick it up. A re-run after a failure part way records and signs everything.
+  - `--fail-existing`, which the dry run uses, makes an existing version an error.
+  - A tag check counts as "not there" only on a 404, or a 401/403 whose OCI error says the name is unknown. Anything else fails the publish.
 
 `scripts/publish.py publish` pushes with `wkg oci push`, which writes the Wasm OCI layout wkg reads:
 - an `application/vnd.wasm.config.v0+json` config with the component's imports and exports;
@@ -44,9 +53,9 @@ It annotates the manifest from the build's `provenance.json`:
 | `org.opencontainers.image.description` | from the manifest |
 | `org.opencontainers.image.source`, `.revision` | this repo and commit |
 | `org.opencontainers.image.created` | the publish time |
-| `org.opencontainers.image.licenses` | the SPDX licences of the tool and what it links, joined with `AND` |
+| `org.opencontainers.image.licenses` | the SPDX licences of the tool and the libraries it statically links (its `[[deps]]`), joined with `AND`. Its crates' and Go modules' licences are only in its notices for now. |
 | `run.eryx.command.upstream` | `<repo>@<commit>`, or `<url>#sha256:<digest>` for an archive |
-| `run.eryx.command.eryx-build` | the eryx-build version |
+| `run.eryx.command.eryx-build` | the eryx-build version and the eryx commit it was installed from (`0.15.1+<eryx_rev>`) |
 | `run.eryx.command.wit` | the WIT packages it imports, with versions (`wasi:cli@0.2.12,...`) |
 | `run.eryx.command.names` | for a multicall command, every name it answers to (`names` in `commands.toml`) |
 

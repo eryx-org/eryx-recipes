@@ -32,8 +32,10 @@ on:
         type: boolean
         default: false
 
+# A manual run gets a group of its own, so a push to main queued behind it
+# can't cancel it while it waits (GitHub keeps one pending run per group).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -363,22 +365,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The real publish: manual runs with `publish` set only, after the dry run,
-  # behind the ghcr-publish environment's approval. Packages are private and
-  # linked to this repo (org.opencontainers.image.source).
+  # The real publish: manual runs on main with `publish` set, by Ben, after
+  # the dry run. Packages are private and linked to this repo
+  # (org.opencontainers.image.source).
+  #
+  # The actor check is the approval: required reviewers on an environment
+  # need a paid plan for a private repo. Move this to an environment with
+  # reviewers once the repo is public.
   publish:
     name: Publish to ghcr.io
     needs: publish-dry-run
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main' && github.actor == 'sd2k' }}
     runs-on: ubuntu-latest
-    environment: ghcr-publish
+    # One publish at a time, never cancelled: the check that a version isn't
+    # in the registry yet is only good while nothing else is pushing.
+    concurrency:
+      group: publish-ghcr
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
     outputs:
-      # What was pushed: each command's reference, layer digest and
-      # manifest_digest. Signing and attestations (#6) attach to the latter,
-      # in a job that `needs: publish` (with `id-token: write`).
+      # Each built command's reference, `pushed` (false if it was already
+      # there), layer digest and manifest_digest. Signing and attestations
+      # (#6) attach to the latter, in a job that `needs: publish` (with
+      # `id-token: write`); listing versions that were already there lets a
+      # re-run sign what a failed run pushed.
       results: ${{ steps.publish.outputs.results }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -404,7 +416,9 @@ jobs:
             --out scratch/results.json scratch/*-component
           python3 scripts/publish.py lock --results scratch/results.json
           echo "results=$(jq -c . scratch/results.json)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Even after a failure part way: results.json has what was pushed.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: published
           path: |
@@ -412,12 +426,15 @@ jobs:
             commands.lock
           retention-days: 90
 
-  # Record the new versions in commands.lock through a PR, so the index changes
-  # are reviewed like any other.
+  # Record the versions in commands.lock through a PR, so the index changes
+  # are reviewed like any other. Results include versions that were already
+  # published, so a re-run records what an earlier run missed. The PR is
+  # opened with GITHUB_TOKEN, so CI doesn't run on it; it only changes the
+  # lock. It needs "Allow GitHub Actions to create and approve pull requests"
+  # in the repo's Actions settings.
   record:
     name: Record in commands.lock
     needs: publish
-    if: ${{ needs.publish.outputs.results != '[]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -437,6 +454,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           cp scratch/published/commands.lock commands.lock
+          if git diff --quiet commands.lock; then
+            echo "commands.lock already has every version."
+            exit 0
+          fi
           branch="publish/run-$RUN_ID"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

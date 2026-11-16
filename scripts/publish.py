@@ -4,7 +4,8 @@
     publish.py check-versions [--base REF]
         Check commands.toml against the recipes in clis/. With --base, also
         check that every command whose build inputs changed since REF has a
-        new version, and that a new upstream version starts again at r.1.
+        new version, that a new upstream version starts again at r.1, and
+        that no version is lower than one commands.lock already has.
 
     publish.py publish --registry HOST [--insecure] [--fail-existing]
                        [--out RESULTS.json] COMPONENT_DIR...
@@ -12,13 +13,18 @@
         component.wasm and provenance.json) to
         HOST/eryx-org/commands/<namespace>/<name>:<version> with `wkg oci
         push`, annotated from its provenance. A version that's already in the
-        registry is never pushed again: it's skipped, or with --fail-existing
-        it fails the run. The pushed manifest is read back and its layer
-        checked against component.wasm. RESULTS.json lists what was pushed,
-        for signing (#6) and for `lock`.
+        registry is never pushed again: it's listed as already there, or with
+        --fail-existing it fails the run. The pushed manifest is read back
+        and its layer checked against component.wasm. RESULTS.json lists
+        every command, pushed or already there, with its digests, for
+        signing (#6) and for `lock`; it's rewritten after each command.
 
     publish.py lock --results RESULTS.json [--lock commands.lock]
-        Add the pushed versions to a lock file in wkg.lock's format.
+        Add the results' versions to a lock file in wkg.lock's format.
+
+Nothing in an OCI registry stops a tag being pushed again: immutability rests
+on the check before each push, and on publishes never running concurrently
+(CI's publish concurrency group).
 
 Registry credentials come from WKG_OCI_USERNAME and WKG_OCI_PASSWORD, as
 for wkg itself. Only the standard library is used.
@@ -42,13 +48,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 COMMANDS = "commands.toml"
+LOCK = "commands.lock"
 REPOSITORY_PREFIX = "eryx-org/commands"
 SOURCE_URL = "https://github.com/eryx-org/eryx-commands"
-VERSION = re.compile(r"^(?P<upstream>[0-9A-Za-z][0-9A-Za-z.+]*?)-r\.(?P<revision>[1-9][0-9]*)$")
+# `<MAJOR.MINOR.PATCH>-r.<n>`: semver, with the revision as a prerelease
+# whose numeric part compares numerically (`-r.2 < -r.10`), as wkg needs.
+VERSION = re.compile(
+    r"^(?P<upstream>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))"
+    r"-r\.(?P<revision>[1-9][0-9]*)$"
+)
 MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
 
 # The pinned tools whose versions change what each lane builds, as
-# (mise.toml table, key) pairs.
+# (mise.toml table, key) pairs; see build_inputs.
 LANE_PINS = {
     "rust": [("vars", "eryx_rev"), ("tools", "rust")],
     # C builds link a rustc-built start-up object (eryx-org/eryx#978).
@@ -56,8 +68,10 @@ LANE_PINS = {
           ("tools", "github:bytecodealliance/wit-bindgen")],
     "go": [("vars", "eryx_rev"), ("tools", "cargo:wasm-tools")],
 }
-# Files outside the recipe a lane's output depends on.
+# Files outside the recipe a lane's output depends on; see build_inputs.
 LANE_FILES = {"go": ["scripts/bootstrap-go-wasip3.sh"]}
+# A file a patch script reads from its own directory, named in the script.
+SIBLING = re.compile(r"[A-Za-z0-9_.-]+\.(?:patch|diff|sh|c|h|py)\b")
 
 
 class Error(Exception):
@@ -109,7 +123,7 @@ def upstream_from_ref(name: str, ref: str) -> str:
 def parse_version(version: str) -> tuple[str, int]:
     match = VERSION.match(version)
     if not match:
-        raise Error(f"version {version!r} isn't `<upstream>-r.<n>`")
+        raise Error(f"version {version!r} isn't `<MAJOR.MINOR.PATCH>-r.<n>`")
     return match["upstream"], int(match["revision"])
 
 
@@ -124,21 +138,46 @@ def strings(value) -> list[str]:
     return []
 
 
-def recipe_inputs(root: Path, manifest_rel: str, manifest: dict) -> list[str]:
-    """The repo paths a recipe builds from: the manifest, and every file or
-    directory it names (patches, shims, a WIT world), outside scratch/."""
-    inputs = {manifest_rel}
+def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[str], list]:
+    """What a recipe's build depends on: the repo paths it reads, and the
+    mise.toml pins of its lane, as (table, key) pairs. A change to any of them
+    is a new build, so needs a new version (check_versions).
+
+    The paths are:
+    - the manifest, and every file under its own directory when it has one
+      (clis/gpl/<name>/: its patches, shims and notices);
+    - every repo path the manifest names, bare or as `{repo}/<path>` inside a
+      flag (patches, shims, a WIT world), outside scratch/;
+    - the files a named script reads from beside it (patch-git.sh applies
+      git-wasi.patch), found by name in the script;
+    - its lane's files outside clis/ (LANE_FILES).
+    """
+    paths = {manifest_rel}
+    recipe_dir = Path(manifest_rel).parent
+    if recipe_dir != Path("clis"):
+        paths.update(
+            p.relative_to(root).as_posix() for p in (root / recipe_dir).rglob("*") if p.is_file()
+        )
     for value in strings(manifest):
-        if value.startswith(("scratch/", "/")) or ".." in value:
-            continue
-        if (root / value).exists():
-            inputs.add(value.rstrip("/"))
-    inputs.update(LANE_FILES.get(manifest["lang"], []))
-    return sorted(inputs)
+        for candidate in [value, *re.findall(r"\{repo\}/(\S+)", value)]:
+            candidate = candidate.rstrip("/")
+            if candidate.startswith(("scratch/", "/")) or ".." in candidate:
+                continue
+            path = root / candidate
+            if not path.exists():
+                continue
+            paths.add(candidate)
+            if path.is_file() and path.suffix == ".sh":
+                for name in SIBLING.findall(path.read_text()):
+                    if (path.parent / name).is_file():
+                        paths.add((Path(candidate).parent / name).as_posix())
+    lang = manifest["lang"]
+    paths.update(LANE_FILES.get(lang, []))
+    return sorted(paths), LANE_PINS[lang]
 
 
-def pins(mise: dict, lang: str) -> list:
-    return [mise.get(table, {}).get(key) for table, key in LANE_PINS[lang]]
+def pin_values(mise: dict, pins: list) -> list:
+    return [mise.get(table, {}).get(key) for table, key in pins]
 
 
 def check_versions(root: Path, base: str | None) -> list[str]:
@@ -155,6 +194,8 @@ def check_versions(root: Path, base: str | None) -> list[str]:
         base_mise = tomllib.loads(git(root, "show", f"{base}:mise.toml", check=False) or "")
         changed = set(git(root, "diff", "--name-only", f"{base}...HEAD").split())
     mise = tomllib.loads((root / "mise.toml").read_text())
+    lock_path = root / LOCK
+    locked = read_lock(lock_path.read_text() if lock_path.exists() else "")
 
     for key, entry in sorted(commands.items()):
         label = f"{key[0]}:{key[1]}"
@@ -174,19 +215,25 @@ def check_versions(root: Path, base: str | None) -> list[str]:
                 f"{label}: version {entry['version']} doesn't match the upstream "
                 f"{expected} in {rel} (set `upstream` if the ref can't say)"
             )
+        published = sorted(locked.get(f"{key[0]}:{key[1]}", {}), key=version_key)
+        if published and entry["version"] not in published and (
+            version_key(entry["version"]) < version_key(published[-1])
+        ):
+            problems.append(
+                f"{label}: version {entry['version']} is lower than the published {published[-1]}"
+            )
         old = base_commands.get(key)
         if not old:
             continue
         old_upstream, _ = parse_version(old["version"])
         if old_upstream != upstream and revision != 1:
             problems.append(f"{label}: a new upstream version starts at r.1, not r.{revision}")
-        inputs = recipe_inputs(root, rel, manifest)
+        paths, pins = build_inputs(root, rel, manifest)
         touched = sorted(
             path for path in changed
-            if any(path == i or path.startswith(i + "/") for i in inputs)
+            if any(path == i or path.startswith(i + "/") for i in paths)
         )
-        lang = manifest["lang"]
-        if pins(base_mise, lang) != pins(mise, lang):
+        if pin_values(base_mise, pins) != pin_values(mise, pins):
             touched.append("mise.toml (a pinned toolchain)")
         if touched and old["version"] == entry["version"]:
             problems.append(
@@ -225,8 +272,21 @@ def upstream_pin(source: dict) -> str:
 
 
 def annotations(provenance: dict, entry: dict, key: tuple[str, str], revision: str,
-                created: str) -> dict[str, str]:
-    """The manifest annotations for a component, from its provenance."""
+                created: str, eryx_rev: str) -> dict[str, str]:
+    """The manifest annotations for a component, from its provenance.
+
+    `eryx_rev` is mise.toml's eryx commit, recorded with the eryx-build
+    version until eryx-build comes from crates.io (eryx-org/eryx#997).
+    """
+    for field in ("eryx_build", "imports"):
+        if field not in provenance:
+            raise Error(
+                f"{key[0]}:{key[1]}'s provenance.json has no `{field}`: build it with an "
+                "eryx-build from eryx-org/eryx#1004 or later"
+            )
+    # The tool's licence and those of the libraries it statically links (its
+    # [[deps]]). Its crates' and Go modules' licences are in its notices.
+    # TODO(#4): fold those in, from the same data the notices are made from.
     licenses = [provenance["license"]] + [d["license"] for d in provenance["deps"]]
     result = {
         "org.opencontainers.image.title": f"{key[0]}:{key[1]}",
@@ -237,11 +297,9 @@ def annotations(provenance: dict, entry: dict, key: tuple[str, str], revision: s
         "org.opencontainers.image.created": created,
         "org.opencontainers.image.licenses": spdx_and(licenses),
         "run.eryx.command.upstream": upstream_pin(provenance["source"]),
+        "run.eryx.command.eryx-build": f"{provenance['eryx_build']}+{eryx_rev}",
+        "run.eryx.command.wit": ",".join(provenance["imports"]),
     }
-    if provenance.get("eryx_build"):
-        result["run.eryx.command.eryx-build"] = provenance["eryx_build"]
-    if provenance.get("imports"):
-        result["run.eryx.command.wit"] = ",".join(provenance["imports"])
     if entry.get("names"):
         result["run.eryx.command.names"] = ",".join(entry["names"])
     return result
@@ -265,13 +323,20 @@ class Registry:
         )
 
     def manifest(self, repository: str, tag: str) -> dict | None:
-        """The manifest tagged `tag`, or None if there's none."""
+        """The manifest tagged `tag`, or None if there's none.
+
+        "None" needs an unambiguous answer: a 404, or a 401/403 whose OCI
+        error body says the repository or tag is unknown (NAME_UNKNOWN,
+        MANIFEST_UNKNOWN), as some registries answer for a package that
+        doesn't exist yet. Anything else, such as a bare DENIED, fails, so
+        a credentials problem never reads as "not published".
+        """
         url = f"{self.base}/v2/{repository}/manifests/{tag}"
         headers = {"Accept": MANIFEST_MEDIA_TYPE}
         try:
             return json.load(self._open(url, headers))
         except urllib.error.HTTPError as e:
-            if e.code == 404:
+            if e.code == 404 or (e.code in (401, 403) and unknown_name(e.read())):
                 return None
             raise Error(f"GET {url}: HTTP {e.code}") from e
 
@@ -307,16 +372,33 @@ class Registry:
         return body.get("token") or body["access_token"]
 
 
+def unknown_name(body: bytes) -> bool:
+    """Whether an OCI error body only says the name or manifest is unknown."""
+    try:
+        codes = {error.get("code") for error in json.loads(body).get("errors", [])}
+    except (ValueError, AttributeError):
+        return False
+    return bool(codes) and codes <= {"NAME_UNKNOWN", "MANIFEST_UNKNOWN"}
+
+
 def sha256_file(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def publish(dirs: list[Path], registry: Registry, fail_existing: bool) -> list[dict]:
+def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
+            out: Path | None = None) -> list[dict]:
+    """Push each component dir, and return what's in the registry for each:
+    pushed now (`pushed: true`), or already there (`pushed: false`, with the
+    registry's digests). Listing existing versions too makes `lock` and
+    signing idempotent: a re-run after a failure part way records and signs
+    whatever the failed run pushed. `out` is rewritten after each command, so
+    a failure still leaves what was done."""
     commands = load_commands((ROOT / COMMANDS).read_text())
     by_name = {}
     for key in commands:
         by_name.setdefault(key[1], []).append(key)
     revision = (git(ROOT, "rev-parse", "HEAD") or "").strip()
+    eryx_rev = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["eryx_rev"]
     created = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     results = []
@@ -337,32 +419,38 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool) -> list[d
         if not (directory / f"{name}.notices.md").is_file():
             raise Error(f"{directory}: no {name}.notices.md, so {reference} can't be published")
 
-        if registry.manifest(repository, entry["version"]) is not None:
+        existing = registry.manifest(repository, entry["version"])
+        if existing is not None:
             if fail_existing:
                 raise Error(f"{reference} already exists: published versions are never replaced")
+            layers = [layer["digest"] for layer in existing.get("layers", [])]
+            if len(layers) != 1:
+                raise Error(f"{reference} is already there, with layers {layers}, not one")
             print(f"skipped {reference}: already published", file=sys.stderr)
-            continue
-
-        command = ["wkg", "oci", "push"]
-        if registry.base.startswith("http:"):
-            command += ["--insecure", registry.host]
-        for k, v in annotations(provenance, entry, key, revision, created).items():
-            command += ["--annotation", f"{k}={v}"]
-        command += [reference, str(component)]
-        subprocess.run(command, check=True)
-
-        pushed = registry.manifest(repository, entry["version"])
-        layers = (pushed or {}).get("layers", [])
-        if [layer["digest"] for layer in layers] != [digest]:
-            raise Error(f"{reference}: the pushed layers {layers} aren't component.wasm ({digest})")
+            pushed, digest = False, layers[0]
+        else:
+            command = ["wkg", "oci", "push"]
+            if registry.base.startswith("http:"):
+                command += ["--insecure", registry.host]
+            for k, v in annotations(provenance, entry, key, revision, created, eryx_rev).items():
+                command += ["--annotation", f"{k}={v}"]
+            command += [reference, str(component)]
+            subprocess.run(command, check=True)
+            layers = (registry.manifest(repository, entry["version"]) or {}).get("layers", [])
+            if [layer["digest"] for layer in layers] != [digest]:
+                raise Error(f"{reference}: the pushed layers {layers} aren't component.wasm ({digest})")
+            print(f"pushed {reference} ({digest})", file=sys.stderr)
+            pushed = True
         results.append({
             "name": f"{key[0]}:{key[1]}",
             "version": entry["version"],
             "reference": reference,
+            "pushed": pushed,
             "layer_digest": digest,
             "manifest_digest": registry.manifest_digest(repository, entry["version"]),
         })
-        print(f"pushed {reference} ({digest})", file=sys.stderr)
+        if out:
+            out.write_text(json.dumps(results, indent=2) + "\n")
     return results
 
 
@@ -441,7 +529,7 @@ def main() -> int:
     push.add_argument("dirs", nargs="+", type=Path)
     locking = sub.add_parser("lock")
     locking.add_argument("--results", type=Path, required=True)
-    locking.add_argument("--lock", type=Path, default=ROOT / "commands.lock")
+    locking.add_argument("--lock", type=Path, default=ROOT / LOCK)
     args = parser.parse_args()
 
     try:
@@ -451,12 +539,13 @@ def main() -> int:
                 print(f"error: {problem}", file=sys.stderr)
             return 1 if problems else 0
         if args.command == "publish":
-            results = publish(args.dirs, Registry(args.registry, args.insecure), args.fail_existing)
-            out = json.dumps(results, indent=2) + "\n"
             if args.out:
-                args.out.write_text(out)
-            else:
-                sys.stdout.write(out)
+                args.out.write_text("[]\n")
+            results = publish(
+                args.dirs, Registry(args.registry, args.insecure), args.fail_existing, args.out
+            )
+            if not args.out:
+                sys.stdout.write(json.dumps(results, indent=2) + "\n")
             return 0
         lock(json.loads(args.results.read_text()), args.lock)
         return 0
