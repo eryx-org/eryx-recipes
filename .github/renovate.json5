@@ -35,13 +35,16 @@
       matchManagers: ["mise"],
       matchDepNames: ["rust"],
     },
-    // wasmtime and wit-bindgen must match the versions eryx uses (a cwasm
-    // only loads in the wasmtime that built it), so bump them with eryx,
-    // not on their own.
+    // wasmtime (the smoke tests' runtime) and wit-bindgen (the C recipes'
+    // bindings) track eryx's versions, so the WASI and WIT versions the
+    // commands are built and tested against match the host that runs them.
+    // They're grouped and wait for approval on the dashboard, to be bumped
+    // together with eryx.
     {
       matchManagers: ["mise"],
       matchDepNames: ["aqua:bytecodealliance/wasmtime", "github:bytecodealliance/wit-bindgen"],
-      enabled: false,
+      groupName: "wasmtime & wit-bindgen (align with eryx)",
+      dependencyDashboardApproval: true,
     },
   ],
 }

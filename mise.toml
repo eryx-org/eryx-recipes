@@ -9,9 +9,8 @@ rust = { version = "1.100.0", profile = "default" }
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
 
-# Runs the commands' smoke tests, and precompiles those built as cwasm. Keep
-# it on the wasmtime version eryx uses, since a cwasm only loads in the
-# wasmtime that built it.
+# Runs the commands' smoke tests. Keep it on the wasmtime version eryx uses,
+# so the commands are tested against the WASI versions eryx's host provides.
 [tools."aqua:bytecodealliance/wasmtime"]
 version = "50.0.1"
 
@@ -23,6 +22,10 @@ version = "0.63.0"
 # The commands' third-party notices. 0.9 knows wasm32-wasip3.
 [tools."cargo:cargo-about"]
 version = "0.9.3"
+
+# Publishes the commands to the registry in wkg's layout (#5).
+[tools."cargo:wkg"]
+version = "0.16.2"
 
 # The WASI SDK isn't in [tools]: on PATH it breaks host compilation (Rust
 # picks up wasm clang for proc-macro builds), so builds install it on demand.
