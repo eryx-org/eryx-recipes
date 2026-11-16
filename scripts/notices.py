@@ -9,7 +9,11 @@ A command's notices are the entries of third_party/manual.toml that list it
 (the tool, the libraries it links, and its toolchain's libc and runtime), and
 for a Rust command, first, cargo-about's rendering of the crates it's built
 from (about.toml, third_party/about.hbs) and of its toolchain's standard
-library. A Rust command's crates come from its checkout, with the features
+library. For a Go command they're the Go modules it links: `go list -deps`
+with the build's GOOS/GOARCH gives the set, google/licenseclassifier's
+identify_license (pinned in mise.toml) classifies each module's licence
+files in the vendor tree, and each licence must be one about.toml accepts
+(see go_section). A Rust command's crates come from its checkout, with the features
 its manifest builds with, so `generate` needs it built first (`mise run
 build-cli -- NAME`). cargo-about's crate list is checked against `cargo tree`
 for the same target and features (see cargo_about). The standard library's
@@ -48,10 +52,7 @@ COMMANDS = {
 }
 
 # Built and checked, but not published until their notices are complete.
-UNPUBLISHED = {
-    # Its Go modules aren't listed yet (#9).
-    "gh",
-}
+UNPUBLISHED = set()
 PUBLISHED = {name for name in COMMANDS if name not in UNPUBLISHED}
 
 # The cargo flags of a manifest that choose its crates, which cargo-about
@@ -63,12 +64,19 @@ FEATURE_FLAGS = {"--no-default-features", "--all-features", "--features"}
 LANE_ENTRIES = {
     "c": ["wasi-libc (WASI SDK)", "LLVM compiler-rt builtins (WASI SDK)"],
     "rust": ["wasi-libc (Rust's wasm targets)", "The Rust standard library"],
+    "go": ["The Go standard library (wasip3 fork)"],
 }
+
+# The Go lane's target (eryx-build's lanes/go.rs) and toolchain: the wasip3
+# fork that scripts/bootstrap-go-wasip3.sh pins and builds.
+GO_ENV = {"GOOS": "wasip3", "GOARCH": "wasm32"}
+GO_BOOTSTRAP = ROOT / "scripts" / "bootstrap-go-wasip3.sh"
 
 # The target every Rust command is built for (eryx-build's Rust lane).
 RUST_TARGET = "wasm32-wasip2"
 
-LICENCE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|UNLICENSE|NOTICE|COPYRIGHT)", re.I)
+# Source files named like licences (go-openapi/spec's license.go) are code, not licence text.
+LICENCE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|UNLICENSE|NOTICE|COPYRIGHT)(?!.*\.(go|rs|c|h|py|js|s)$)", re.I)
 
 
 def stable_toolchain():
@@ -354,6 +362,136 @@ def manual_section(artifact):
     return "\n".join(out)
 
 
+def go_bootstrap_var(name):
+    match = re.search(rf'^{name}="([^"]+)"', GO_BOOTSTRAP.read_text(), re.M)
+    return match[1] if match else None
+
+
+def go_fork_commit():
+    return go_bootstrap_var("GO_WASIP3_COMMIT")
+
+
+def escape_module(module):
+    """A module path as the module proxy and cache spell it: each capital as
+    `!` and its lower case."""
+    return re.sub(r"[A-Z]", lambda m: "!" + m[0].lower(), module)
+
+
+def mpl_changes(checkout, module, version, env):
+    """The files of vendor/<module> that differ from, or aren't in, the
+    module as published (the module cache's copy, which `go mod vendor`
+    fetched and verified against go.sum)."""
+    cache = Path(run(["go", "env", "GOMODCACHE"], cwd=checkout, env=env).strip()) / f"{escape_module(module)}@{version}"
+    if not cache.is_dir():
+        sys.exit(f"{module}@{version} isn't in the module cache ({cache}); rebuild the command")
+    vendored = checkout / "vendor" / module
+    # Modules vendored inside this one's directory (a/b and a/b/v2) are
+    # their own, so their files aren't compared with this one's.
+    nested = [
+        line.split()[1][len(module) + 1:] + "/"
+        for line in (checkout / "vendor" / "modules.txt").read_text().splitlines()
+        if line.startswith(f"# {module}/")
+    ]
+    changed = []
+    for f in sorted(p for p in vendored.rglob("*") if p.is_file()):
+        rel = f.relative_to(vendored).as_posix()
+        if any(rel.startswith(n) for n in nested):
+            continue
+        original = cache / rel
+        if not original.is_file() or original.read_bytes() != f.read_bytes():
+            changed.append(rel)
+    return changed
+
+
+def go_section(name, path):
+    """Append the notices of the Go modules command `name` links to `path`;
+    false (after reporting why) if one's licence isn't accepted or isn't
+    found.
+
+    Each module's licence files are the ones `go mod vendor` copies into
+    vendor/<module>/ (LICENSE, COPYING, NOTICE, ...). go-licenses would find
+    them by walking up from each package, but in a vendored build `go list`
+    gives modules no directory, so it walks up to the main module's own
+    LICENSE and reports that (in-toto/attestation, Apache-2.0, came out as
+    gh's MIT). They're classified with identify_license instead, with
+    licence headers matched too: several modules ship only Apache-2.0's
+    header as their LICENSE.
+    """
+    m = manifest(name)
+    checkout = ROOT / m["source"]["dir"]
+    if not (checkout / "vendor" / "modules.txt").is_file():
+        sys.exit(f"{name}: {checkout} isn't built; run `mise run build-cli -- {name}` first")
+    goroot = Path(os.environ.get("ERYX_GO_WASIP3_ROOT", ROOT / "scratch" / "go-wasip3"))
+    classifier = ROOT / "scratch" / "tools" / "bin" / "identify_license"
+    if not classifier.is_file():
+        sys.exit("identify_license isn't installed; run `mise run install-license-classifier`")
+    env = {
+        **os.environ, **GO_ENV,
+        "GOROOT": str(goroot),
+        "PATH": f"{goroot / 'bin'}{os.pathsep}{os.environ['PATH']}",
+        "GOFLAGS": "-mod=vendor",
+    }
+    package = m["build"]["package"]
+    # The modules whose packages are linked: not everything in go.sum.
+    listed = run(
+        ["go", "list", "-deps", "-f", "{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}}{{end}}{{end}}", package],
+        cwd=checkout, env=env,
+    )
+    modules = sorted({tuple(line.split()) for line in listed.splitlines() if line.strip()})
+    # A licence for a module's documentation (opencontainers/go-digest's
+    # LICENSE.docs, CC-BY-SA-4.0) doesn't cover the code that's linked.
+    files = {
+        module: sorted(
+            f for f in (checkout / "vendor" / module).iterdir()
+            if f.is_file() and LICENCE_FILE.match(f.name) and "doc" not in f.name.lower()
+        )
+        for module, _ in modules
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        report = Path(tmp) / "licences.json"
+        run([str(classifier), "-headers", f"-json={report}", *(str(f) for fs in files.values() for f in fs)])
+        found = {
+            Path(r["Filepath"]): {c["Name"] for c in r.get("Classifications") or [] if c["Name"] != "Copyright"}
+            for r in json.loads(report.read_text())
+        }
+    accepted = set(tomllib.loads((ROOT / "about.toml").read_text())["accepted"])
+    ok = True
+    out = ["", f"# Go modules {name} is built from", "",
+           f"This command includes these Go modules (`go list -deps {package}` for {GO_ENV['GOOS']}/{GO_ENV['GOARCH']}), under the licences below.", ""]
+    for module, version in modules:
+        names = sorted(set().union(*(found.get(f.resolve(), found.get(f, set())) for f in files[module])) if files[module] else set())
+        if not names:
+            print(f"error: {name}: no licence found for {module} {version} in vendor/{module}", file=sys.stderr)
+            ok = False
+            continue
+        if bad := [n for n in names if n not in accepted]:
+            print(f"error: {name}: {module} {version} is {', '.join(bad)}, which about.toml doesn't accept", file=sys.stderr)
+            ok = False
+            continue
+        source = [f"Source: https://pkg.go.dev/{module}@{version}"]
+        if "MPL-2.0" in names:
+            # Accepted for unmodified dependencies only (about.toml): check
+            # the vendored copy is the published module, and point at its
+            # source, as MPL-2.0 asks.
+            if changed := mpl_changes(checkout, module, version, env):
+                print(f"error: {name}: {module} {version} is MPL-2.0, which is only accepted unmodified, "
+                      f"but the recipe changed {', '.join(changed)}", file=sys.stderr)
+                ok = False
+                continue
+            source = [
+                "Source (MPL-2.0, unmodified): "
+                f"https://proxy.golang.org/{escape_module(module)}/@v/{version}.zip",
+                *([f"Repository: https://{module}/tree/{version}"] if module.startswith("github.com/") else []),
+            ]
+        out += [f"## {module} {version}", "", f"Licence: {' AND '.join(names)}  ", *(f"{line}  " for line in source), ""]
+        for f in files[module]:
+            out += ["```", f.read_text(errors="replace").rstrip(), "```", ""]
+    if ok:
+        with path.open("a") as f:
+            f.write("\n".join(out))
+    return ok
+
+
 def generate(outdir, names):
     """Write each named command's notices; return the ones that failed."""
     outdir.mkdir(parents=True, exist_ok=True)
@@ -368,7 +506,12 @@ def generate(outdir, names):
         if lang not in LANE_ENTRIES:
             sys.exit(f"{name}: no notices for the {lang} lane (LANE_ENTRIES)")
         args = cli_about_args(name, required=True)
-        if args is None:
+        if manifest(name)["lang"] == "go":
+            path.write_text("# Third-party notices\n")
+            if not go_section(name, path):
+                failed.append(name)
+                continue
+        elif args is None:
             path.write_text("# Third-party notices\n")
         else:
             run(["cargo", "fetch", "--locked", "--manifest-path", args[args.index("-m") + 1]])
@@ -412,6 +555,10 @@ def check_manual():
                 for string in c["sysroot_strings"]["strings"]:
                     if string.encode() not in data:
                         errors.append(f"{c['name']}: {c['rust_toolchain']}'s {rel} doesn't contain {string!r}; update the entry")
+        if "go_fork_commit" in c and c["go_fork_commit"] != go_fork_commit():
+            errors.append(f"{c['name']}: scripts/bootstrap-go-wasip3.sh builds {go_fork_commit()}, not {c['go_fork_commit']}; update the entry")
+        if "go_fork_commit" in c and not c["version"].startswith(f"{go_bootstrap_var('GO_WASIP3_REF')} "):
+            errors.append(f"{c['name']}: scripts/bootstrap-go-wasip3.sh builds {go_bootstrap_var('GO_WASIP3_REF')}, not {c['version']}; update the entry")
         if "wasi_sdk" in c and c["wasi_sdk"] != mise["vars"]["wasi_sdk_version"]:
             errors.append(f"{c['name']}: mise.toml pins {mise['vars']['wasi_sdk_version']}, not {c['wasi_sdk']}; update the entry")
 
@@ -437,7 +584,7 @@ def main():
     match sys.argv[1:]:
         case ["generate", outdir, *names] if names:
             if failed := generate(Path(outdir), names):
-                sys.exit(f"cargo-about failed for {', '.join(failed)}; see its output above")
+                sys.exit(f"the notices failed for {', '.join(failed)}; see the errors above")
         case ["published", name]:
             if name not in COMMANDS:
                 sys.exit(f"unknown command {name}")

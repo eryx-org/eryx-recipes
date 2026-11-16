@@ -47,9 +47,13 @@ jobs:
       c: ${{ steps.filter.outputs.c }}
       go: ${{ steps.filter.outputs.go }}
     steps:
+      # On a push, paths-filter diffs against the push's before commit, and
+      # fetches it if it isn't here; without credentials that fetch fails in a
+      # private repo. Full history means it's always here. PRs use the API.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -88,6 +92,10 @@ jobs:
               - 'scripts/bootstrap-go-wasip3.sh'
               # eryx-build's Go lane is pinned there.
               - 'mise.toml'
+              # What its notices are made from.
+              - 'scripts/notices.py'
+              - 'about.toml'
+              - 'third_party/**'
 
   check:
     name: Check manifests
@@ -271,6 +279,11 @@ jobs:
           key: ${{ steps.go-wasip3-cache.outputs.cache-primary-key }}
       - run: mise run build-cli -- gh
       - run: clis/smoke.sh gh
+      # Its Go modules' licences, and the Go standard library's.
+      - name: Write the notices
+        run: |
+          mise run install-license-classifier
+          mise run notices -- scratch/gh-component gh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gh-component
@@ -279,5 +292,6 @@ jobs:
             scratch/gh-component/*.cwasm
             scratch/gh-component/manifest.toml
             scratch/gh-component/provenance.json
+            scratch/gh-component/gh.notices.md
           if-no-files-found: error
           retention-days: 14
