@@ -3,8 +3,9 @@
 # isn't accepted here, or can't be determined, fails the notices.
 #
 # Accepted licences, in order of preference. A dual-licensed crate gets the
-# first of its options listed here. Copyleft licences aren't listed, so a
-# crate offering one gets its permissive option.
+# first of its options listed here. Copyleft licences aren't listed (MPL-2.0
+# aside, below), so a crate offering one gets its permissive option. The Go
+# commands' modules are held to the same list (scripts/notices.py).
 accepted = [
     "MIT",
     "Apache-2.0",
@@ -21,6 +22,13 @@ accepted = [
     "MIT-0",
     "CC0-1.0",
     "Unlicense",
+    # MPL-2.0 is accepted here, and only here (eryx's own about.toml doesn't
+    # list it), for UNMODIFIED dependencies only (Ben, 2026-11-16): its
+    # file-level copyleft then only asks that recipients can get the MPL
+    # files' source, which each notice points at. scripts/notices.py fails
+    # when a recipe patches an MPL-2.0 dependency. Last, so a dual-licensed
+    # dependency gets its other option.
+    "MPL-2.0",
 ]
 # Only what ends up in a shipped artifact.
 ignore-build-dependencies = true

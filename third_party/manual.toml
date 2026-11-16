@@ -17,6 +17,8 @@
 #               is the one it ships
 #   wasi_sdk  - code from the WASI SDK: the version, which must be
 #               mise.toml's wasi_sdk_version
+#   go_fork_commit - code from the wasip3 Go fork: the commit, which must be
+#               the one scripts/bootstrap-go-wasip3.sh builds
 
 # ---------------------------------------------------------------------------
 # The commands and their [[deps]]
@@ -105,6 +107,18 @@ artifacts = ["curl"]
 cli = "clis/curl.toml"
 cli_dep = "mbedtls"
 cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
+
+[[component]]
+name = "GitHub CLI"
+version = "2.87.3 (cf862d65)"
+license = "MIT"
+url = "https://github.com/cli/cli/tree/cf862d65df7f8ff528015e235c8cccd48cea286f"
+# Its Go modules are listed from its vendor tree (scripts/notices.py,
+# go_section), hashicorp/go-version (MPL-2.0, unmodified) among them.
+files = ["third_party/licenses/gh-LICENSE"]
+artifacts = ["gh"]
+cli = "clis/gh.toml"
+cli_commit = "cf862d65df7f8ff528015e235c8cccd48cea286f"
 
 [[component]]
 name = "SQLite"
@@ -225,3 +239,14 @@ files = [
 ]
 rust_toolchain = "1.100.0"
 artifacts = ["rg", "sd", "jaq"]
+
+[[component]]
+name = "The Go standard library (wasip3 fork)"
+version = "wasip3-0.3.0-go1.27.4 (dfb22bf4)"
+license = "BSD-3-Clause"
+url = "https://github.com/sd2k/go/tree/dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+# The Go lane's standard library and runtime: Go 1.27.4 ported to WASI 0.3
+# (scripts/bootstrap-go-wasip3.sh). Go's LICENSE and its patent grant.
+files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
+go_fork_commit = "dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+artifacts = ["gh"]

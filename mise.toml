@@ -40,6 +40,10 @@ wasi_sdk_version = "wasi-sdk-33"
 # (wit/process.wit) git is built against. Until eryx-build is on crates.io
 # (eryx-org/eryx#997) it's installed from git at this commit.
 eryx_rev = "e4c317dda8d59cd60875f769c4f0881cf46c7525"
+# google/licenseclassifier's identify_license, which classifies a Go
+# command's module licence files for its notices. Installed with the host
+# Go into scratch/tools, like eryx-build.
+license_classifier_version = "v2.0.0"
 
 [tasks.install-eryx-build]
 description = "Install eryx-build from eryx-org/eryx at vars.eryx_rev into scratch/tools"
@@ -53,6 +57,19 @@ fi
 cargo install --locked --quiet --root scratch/tools \
     --git https://github.com/eryx-org/eryx --rev "{{vars.eryx_rev}}" eryx-build
 echo "{{vars.eryx_rev}}" > scratch/tools/eryx-rev
+"""
+
+[tasks.install-license-classifier]
+description = "Install identify_license at vars.license_classifier_version into scratch/tools (needs a host Go)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -x scratch/tools/bin/identify_license ] && [ "$(cat scratch/tools/license-classifier-version 2>/dev/null)" = "{{vars.license_classifier_version}}" ]; then
+    exit 0
+fi
+mkdir -p scratch/tools/bin
+GOBIN="$PWD/scratch/tools/bin" go install "github.com/google/licenseclassifier/v2/tools/identify_license@{{vars.license_classifier_version}}"
+echo "{{vars.license_classifier_version}}" > scratch/tools/license-classifier-version
 """
 
 [tasks.ensure-wasi-sdk]
