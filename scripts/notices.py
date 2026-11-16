@@ -92,6 +92,12 @@ def stable_toolchain():
 STABLE = stable_toolchain()
 
 
+def published_version(name):
+    """Command `name`'s version in commands.toml (`<upstream>-r.<n>`)."""
+    namespace = "eryx-gpl" if COMMANDS[name].startswith("clis/gpl/") else "eryx"
+    return tomllib.loads((ROOT / "commands.toml").read_text())[namespace][name]["version"]
+
+
 def manifest(name):
     return tomllib.loads((ROOT / COMMANDS[name]).read_text())
 
@@ -146,18 +152,20 @@ def spdx_package(name, version, licence, location, purl=None):
 def crate_package(package, licence):
     """The SPDX package of a crate, from its `cargo metadata` entry."""
     name, version = package["name"], package["version"]
-    # A crate from crates.io, or one of the checkout's own (a path source).
+    # A crate from crates.io, or a path source: one of the checkout's own,
+    # or the standard library's (std, core, ...), which crates.io doesn't
+    # have, so no purl.
     if (package.get("source") or "").startswith("registry+"):
         location = f"https://crates.io/api/v1/crates/{name}/{version}/download"
-    else:
-        location = package.get("repository")
-    return spdx_package(name, version, licence, location, f"pkg:cargo/{name}@{version}")
+        return spdx_package(name, version, licence, location, f"pkg:cargo/{name}@{version}")
+    return spdx_package(name, version, licence, package.get("repository"))
 
 
 def sbom_document(name, packages, created=None):
     """Command `name`'s SBOM: the command (packages[0]) contains the rest.
-    The namespace is a hash of the packages, so the same notices give the
-    same document apart from `created`."""
+    The namespace is a hash of the packages, the command's version and
+    component.wasm digest included, so the same build gives the same
+    document apart from `created`, and another build a different one."""
     # A crate both the command and its standard library use is listed once.
     unique = []
     for p in packages:
@@ -578,11 +586,20 @@ def generate(outdir, names):
         m = manifest(name)
         lang = m["lang"]
         source = m["source"]
-        # The command itself; what it statically links ([[deps]]) is in manual.toml.
-        sbom = [spdx_package(
-            name, source["ref"], m["license"],
+        # The command itself, as published (its commands.toml version and
+        # the component built); what it statically links ([[deps]]) is in
+        # manual.toml.
+        component = ROOT / m["output"]["dir"] / "component.wasm"
+        if not component.is_file():
+            sys.exit(f"{name}: {component} isn't built; run `mise run build-cli -- {name}` first")
+        tool = spdx_package(
+            name, published_version(name), m["license"],
             f"git+{source['repo']}@{source['commit']}" if source.get("commit") else source["repo"],
-        )]
+        )
+        tool["sourceInfo"] = f"built from {source['repo']} at {source['ref']}"
+        with component.open("rb") as f:
+            tool["checksums"] = [{"algorithm": "SHA256", "checksumValue": hashlib.file_digest(f, "sha256").hexdigest()}]
+        sbom = [tool]
         if lang not in LANE_ENTRIES:
             sys.exit(f"{name}: no notices for the {lang} lane (LANE_ENTRIES)")
         args = cli_about_args(name, required=True)

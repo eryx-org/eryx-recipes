@@ -27,9 +27,20 @@ class Sbom(unittest.TestCase):
         again = notices.sbom_document("sd", [tool, crate], created="2027-01-01T00:00:00Z")
         self.assertEqual(doc["documentNamespace"], again["documentNamespace"])
 
-    def test_path_crate_has_no_crates_io_location(self):
+    def test_path_crate_has_no_crates_io_location_or_purl(self):
         crate = notices.crate_package({"name": "core", "version": "0.0.0", "source": None}, "MIT OR Apache-2.0")
         self.assertEqual(crate["downloadLocation"], "NOASSERTION")
+        self.assertNotIn("externalRefs", crate)
+
+    def test_another_build_gets_another_namespace(self):
+        tool = notices.spdx_package("sd", "1.1.0-r.1", "MIT", None)
+        rebuilt = {**tool, "versionInfo": "1.1.0-r.2"}
+        self.assertNotEqual(notices.sbom_document("sd", [tool])["documentNamespace"],
+                            notices.sbom_document("sd", [rebuilt])["documentNamespace"])
+
+    def test_published_version(self):
+        self.assertRegex(notices.published_version("sd"), r"-r\.[1-9][0-9]*$")
+        self.assertRegex(notices.published_version("git"), r"-r\.[1-9][0-9]*$")
 
 
 if __name__ == "__main__":
