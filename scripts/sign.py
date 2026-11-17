@@ -181,12 +181,15 @@ def fetch_upstream(source: dict, prefix: str, out: Path) -> dict:
     pinned commit (`git archive`), or an archive checked against its pinned
     sha256. Returns where it came from."""
     if source.get("commit"):
+        # A command's own [source] names its repo `repo`; a git [[deps]]
+        # entry names it `url`.
+        remote = source.get("repo") or source.get("url")
         repo = out.parent / f"{prefix}.git"
         git("init", "-q", "--bare", str(repo))
-        git("fetch", "-q", "--depth", "1", source["repo"], source["commit"], cwd=repo)
+        git("fetch", "-q", "--depth", "1", remote, source["commit"], cwd=repo)
         git("archive", "--format=tar.gz", f"--prefix={prefix}/", "-o", str(out), source["commit"],
             cwd=repo)
-        return {"repo": source["repo"], "ref": source.get("ref"), "commit": source["commit"]}
+        return {"repo": remote, "ref": source.get("ref"), "commit": source["commit"]}
     url, sha256 = source.get("url") or source.get("repo"), source.get("sha256")
     if not (url and sha256):
         raise Error(f"{prefix}: pinned by neither commit nor url and sha256: {source}")
