@@ -4,18 +4,26 @@ git is licensed under the GNU General Public License, version 2 only
 (GPL-2.0-only); see `COPYING` in its source, which `git.toml` pins.
 
 Everything in this directory is distributed under the same licence,
-GPL-2.0-only: `git.toml`, `patches/` (including `git-wasi.patch`, our
-modifications to git) and `shims/`. It is not covered by eryx's MIT/Apache-2.0
-licence.
+GPL-2.0-only: `git.toml`, `patches/` (including `git-wasi.patch` and
+`git-https.patch`, our modifications to git) and `shims/`. It is not
+covered by eryx's MIT/Apache-2.0 licence.
 
 - **Source:** the git release `git.toml` pins (repository, tag and commit),
   plus the patches and shims here, are the complete corresponding source of
-  the component `mise run build-cli -- clis/gpl/git/git.toml` builds. zlib
-  (Zlib licence) is fetched and built as `git.toml`'s dependency.
+  the component `mise run build-cli -- clis/gpl/git/git.toml` builds. Its
+  statically linked dependencies are fetched at their pins and built as
+  `git.toml`'s `[[deps]]`: zlib (Zlib licence), libcurl (curl licence) and
+  Mbed TLS.
+- **Mbed TLS licence election:** Mbed TLS is dual-licensed
+  `Apache-2.0 OR GPL-2.0-or-later`. git takes it under
+  **GPL-2.0-or-later**, because Apache-2.0 code can't be combined with git's
+  GPL-2.0-only code, and GPL-2.0-or-later can (as GPL-2.0). eryx's other
+  commands that link Mbed TLS (curl) take it under Apache-2.0. Recorded in
+  `git.toml`'s licence expression and `third_party/manual.toml`.
 - **Separation:** the git component is its own artifact. It is not linked
   into, embedded in or shipped with the eryx crates or binaries; a sandbox
   loads it at run time, and it talks to eryx only through the
-  `eryx:process/run` interface, as any command does.
+  `eryx:process/run` and `eryx:process/pipe` interfaces, as any command does.
 - **Open questions:** whether and how eryx ships GPL components at all
   (artifacts, notices, an SBOM) is tracked in eryx-org/eryx#837, and needs a licensing
   review before any release includes one.

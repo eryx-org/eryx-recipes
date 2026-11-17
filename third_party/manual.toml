@@ -174,6 +174,34 @@ cli = "clis/gpl/git/git.toml"
 cli_dep = "zlib"
 cli_sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
 
+[[component]]
+name = "libcurl"
+version = "8.20.0 (a05f3497)"
+license = "curl"
+url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
+# git's HTTP(S) transport, statically linked (the same curl as clis/curl.toml).
+files = ["third_party/licenses/curl-COPYING"]
+artifacts = ["git"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "curl"
+cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
+
+[[component]]
+name = "Mbed TLS"
+version = "3.6.6"
+# Dual-licensed Apache-2.0 OR GPL-2.0-or-later. In git we take it under
+# GPL-2.0-or-later: Apache-2.0 can't be combined with git's GPL-2.0-only code,
+# and GPL-2.0-or-later can (see clis/gpl/git/NOTICE.md). curl, which isn't
+# GPL, takes it under Apache-2.0 (above). Its LICENSE carries both texts.
+license = "GPL-2.0-or-later"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
+# libcurl's TLS library, statically linked into git.
+files = ["third_party/licenses/mbedtls-LICENSE"]
+artifacts = ["git"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "mbedtls"
+cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
+
 # ---------------------------------------------------------------------------
 # What each lane links (LANE_ENTRIES in scripts/notices.py)
 # ---------------------------------------------------------------------------
