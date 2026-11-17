@@ -8,10 +8,15 @@
 set -euo pipefail
 
 dir="$(dirname "${BASH_SOURCE[0]}")"
-# git-https.patch only reverses cleanly once both are applied.
+# git-https.patch applies on top of git-wasi.patch, so it only reverses
+# cleanly once both are in, and git-wasi.patch only on its own: check each,
+# and apply whatever is missing (a scratch/git from before git-https.patch
+# has just the first).
 if git apply --reverse --check "$dir/git-https.patch" 2>/dev/null; then
     echo "patch-git: already patched"
     exit 0
 fi
-git apply "$dir/git-wasi.patch"
+if ! git apply --reverse --check "$dir/git-wasi.patch" 2>/dev/null; then
+    git apply "$dir/git-wasi.patch"
+fi
 git apply "$dir/git-https.patch"

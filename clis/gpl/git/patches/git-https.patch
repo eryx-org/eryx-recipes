@@ -93,7 +93,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  {
  	struct strvec argv = STRVEC_INIT;
  	struct strbuf input = STRBUF_INIT, cwd = STRBUF_INIT;
-@@ -83,10 +105,37 @@
+@@ -83,13 +105,44 @@
  		errno = EINVAL;
  		goto out;
  	}
@@ -134,8 +134,16 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
 +		argv = words;
  	}
  
- 	if (!in && !cmd->no_stdin && cmd->in > 0) {
-@@ -152,10 +201,49 @@
+-	if (!in && !cmd->no_stdin && cmd->in > 0) {
++	/*
++	 * eryx:process/run takes all of a command's input at once; a piped
++	 * command gets it streamed instead, below.
++	 */
++	if (!piped_slot && !in && !cmd->no_stdin && cmd->in > 0) {
+ 		if (strbuf_read(&input, cmd->in, 0) < 0)
+ 			goto out;
+ 		in = input.buf;
+@@ -152,10 +205,62 @@
  	c_stdin.len = in ? in_len : 0;
  
  	fflush(NULL);
@@ -159,6 +167,19 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
 +			if (in) {
 +				w = wasi_piped_fd(slot, 1);
 +				write_in_full(w, in, in_len);
++				close(w);
++			} else if (!cmd->no_stdin && cmd->in > 0) {
++				/*
++				 * Its input is a file (start_async's spooled
++				 * output, for index-pack): stream it, rather than
++				 * holding all of it in memory.
++				 */
++				char buf[64 * 1024];
++				ssize_t n;
++				w = wasi_piped_fd(slot, 1);
++				while ((n = xread(cmd->in, buf, sizeof(buf))) > 0)
++					if (write_in_full(w, buf, n) < 0)
++						break;
 +				close(w);
 +			}
 +			wasi_piped_close_stdin(slot);
@@ -185,7 +206,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  		switch (run_err) {
  		case ERYX_PROCESS_RUN_RUN_ERROR_COMMAND_NOT_FOUND:
  			errno = ENOENT;
-@@ -199,14 +287,15 @@
+@@ -199,14 +304,15 @@
  		close(cmd->out);
  	if (cmd->err > 0)
  		close(cmd->err);
@@ -203,7 +224,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  	if (code < 0)
  		errno = saved_errno;
  	return code;
-@@ -884,6 +973,17 @@
+@@ -884,6 +990,17 @@
  		cmd->pid = WASI_DEFERRED_PID;
  		return 0;
  	}
@@ -221,7 +242,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  #endif
  
  	/*
-@@ -1210,7 +1310,16 @@
+@@ -1210,7 +1327,16 @@
  {
  #ifdef __wasi__
  	if (cmd->pid == WASI_DEFERRED_PID)
@@ -239,7 +260,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  #endif
  	int ret = wait_or_whine(cmd->pid, cmd->args.v[0], 0);
  	trace2_child_exit(cmd, ret);
-@@ -1371,6 +1480,45 @@
+@@ -1371,6 +1497,45 @@
  
  int start_async(struct async *async)
  {
@@ -285,7 +306,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  	int need_in, need_out;
  	int fdin[2], fdout[2];
  	int proc_in, proc_out;
-@@ -1486,6 +1634,9 @@
+@@ -1486,6 +1651,9 @@
  
  int finish_async(struct async *async)
  {
@@ -295,7 +316,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  #ifdef NO_PTHREADS
  	int ret = wait_or_whine(async->pid, "child process", 0);
  
-@@ -1505,6 +1656,13 @@
+@@ -1505,6 +1673,13 @@
  
  int async_with_fork(void)
  {
@@ -309,7 +330,7 @@ built into git as `git remote-http`/`remote-https`, linked with libcurl.
  #ifdef NO_PTHREADS
  	return 1;
  #else
-@@ -1644,7 +1802,7 @@
+@@ -1644,7 +1819,7 @@
  	int nr = 0;
  
  #ifdef __wasi__
