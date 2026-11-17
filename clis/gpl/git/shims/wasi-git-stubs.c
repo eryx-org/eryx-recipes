@@ -32,7 +32,8 @@ pid_t waitpid(pid_t p, int *s, int o) { (void)p; (void)s; (void)o; errno = ECHIL
 pid_t wait(int *s) { (void)s; errno = ECHILD; return -1; }
 int pipe(int fds[2]) { (void)fds; NOSYS(-1); }
 int kill(pid_t p, int s) { (void)p; (void)s; NOSYS(-1); }
-int dup(int fd) { (void)fd; NOSYS(-1); }
+int wasi_vfd_dup(int fd);
+int dup(int fd) { return wasi_vfd_dup(fd); }
 int dup2(int fd, int fd2) { (void)fd; (void)fd2; NOSYS(-1); }
 mode_t umask(mode_t m) { (void)m; return 022; }
 unsigned alarm(unsigned s) { (void)s; return 0; }

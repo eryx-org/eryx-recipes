@@ -1,0 +1,388 @@
+SPDX-License-Identifier: GPL-2.0-only
+
+Modifications to git v2.56.1 for HTTP(S) on the wasip2 build, on top of
+git-wasi.patch (see ../NOTICE.md): live pipes to commands started through
+eryx:process/pipe in run-command.c (with wasi-pipes.c's file descriptors),
+shell commands without shell syntax run as a plain argv (credential
+helpers), start_async run inline with its output spooled, send-pack's
+receive-status demuxer started once the request is sent, and remote-curl
+built into git as `git remote-http`/`remote-https`, linked with libcurl.
+
+--- a/Makefile
++++ b/Makefile
+@@ -2682,9 +2682,9 @@
+ 	'-DGIT_MAN_PATH="$(mandir_relative_SQ)"' \
+ 	'-DGIT_INFO_PATH="$(infodir_relative_SQ)"'
+ 
+-git$X: git.o GIT-LDFLAGS $(BUILTIN_OBJS) $(GITLIBS)
++git$X: git.o GIT-LDFLAGS $(BUILTIN_OBJS) remote-curl.o http.o http-walker.o $(GITLIBS)
+ 	$(QUIET_LINK)$(CC) $(ALL_CFLAGS) -o $@ $(ALL_LDFLAGS) \
+-		$(filter %.o,$^) $(LIBS)
++		$(filter %.o,$^) $(CURL_LIBCURL) $(LIBS)
+ 
+ help.sp help.s help.o: command-list.h
+ builtin/bugreport.sp builtin/bugreport.s builtin/bugreport.o: hook-list.h
+--- a/builtin.h
++++ b/builtin.h
+@@ -241,6 +241,7 @@
+ int cmd_remote(int argc, const char **argv, const char *prefix, struct repository *repo);
+ int cmd_remote_ext(int argc, const char **argv, const char *prefix, struct repository *repo);
+ int cmd_remote_fd(int argc, const char **argv, const char *prefix, struct repository *repo);
++int cmd_remote_curl(int argc, const char **argv, const char *prefix, struct repository *repo);
+ int cmd_repack(int argc, const char **argv, const char *prefix, struct repository *repo);
+ int cmd_replay(int argc, const char **argv, const char *prefix, struct repository *repo);
+ int cmd_repo(int argc, const char **argv, const char *prefix, struct repository *repo);
+--- a/git.c
++++ b/git.c
+@@ -641,6 +641,8 @@
+ 	{ "remote", cmd_remote, RUN_SETUP },
+ 	{ "remote-ext", cmd_remote_ext, NO_PARSEOPT },
+ 	{ "remote-fd", cmd_remote_fd, NO_PARSEOPT },
++	{ "remote-http", cmd_remote_curl, NO_PARSEOPT },
++	{ "remote-https", cmd_remote_curl, NO_PARSEOPT },
+ 	{ "repack", cmd_repack, RUN_SETUP },
+ 	{ "replace", cmd_replace, RUN_SETUP },
+ 	{ "replay", cmd_replay, RUN_SETUP },
+--- a/remote-curl.c
++++ b/remote-curl.c
+@@ -1549,7 +1549,7 @@
+ 	return 0;
+ }
+ 
+-int cmd_main(int argc, const char **argv)
++int cmd_remote_curl(int argc, const char **argv, const char *prefix UNUSED, struct repository *repo UNUSED)
+ {
+ 	struct strbuf buf = STRBUF_INIT;
+ 	int nongit;
+--- a/run-command.c
++++ b/run-command.c
+@@ -53,13 +53,35 @@
+ }
+ 
+ /*
++ * Live pipes to commands started through eryx:process/pipe, as file
++ * descriptors (wasi-pipes.c). A piped command's pid is WASI_PIPED_PID plus
++ * its slot there, and wasi_drain_to[slot] says where finish_command copies
++ * stdout git didn't take a pipe for: an fd, -1 for nowhere, or -2 for none
++ * (git reads it from cmd->out).
++ */
++int wasi_piped_register(uint32_t handle);
++int wasi_piped_fd(int slot, int writing);
++void wasi_piped_close_stdin(int slot);
++void wasi_piped_drain(int slot, int fd);
++int wasi_piped_wait(int slot);
++void wasi_unlink_on_close(int fd, const char *path);
++#define WASI_PIPED_PID 100000
++#define WASI_PIPED_MAX 32
++static int wasi_drain_to[WASI_PIPED_MAX];
++
++/*
+  * Run cmd to completion through the host, with in (or, with neither in nor
+  * no_stdin, the contents of cmd->in when it's a file) as its stdin. Its
+  * output goes to out/err when given, else where cmd says: a file
+  * descriptor, nowhere, or this process's own stdout and stderr.
++ *
++ * With piped_slot, start it through eryx:process/pipe instead, with live
++ * pipes for the stdin and stdout cmd asks for (-1), and return at once,
++ * leaving its slot there for finish_command.
+  */
++
+ static int wasi_run(struct child_process *cmd, const char *in, size_t in_len,
+-		    struct strbuf *out, struct strbuf *err)
++		    struct strbuf *out, struct strbuf *err, int *piped_slot)
+ {
+ 	struct strvec argv = STRVEC_INIT;
+ 	struct strbuf input = STRBUF_INIT, cwd = STRBUF_INIT;
+@@ -83,13 +105,44 @@
+ 		errno = EINVAL;
+ 		goto out;
+ 	}
+-	/* No shell: a shell command runs only if it's a plain argv. */
+-	if (cmd->use_shell && strcspn(argv.v[0], "|&;<>()$`\\\"' \t\n*?[#~=%") != strlen(argv.v[0])) {
+-		errno = ENOSYS;
+-		goto out;
++	/*
++	 * No shell: a shell command runs as a plain argv, its words split on
++	 * spaces and tabs followed by its arguments, if it uses no shell syntax.
++	 * Credential helpers (`git credential-store get`, `!gh auth
++	 * git-credential get`) and editors look like that.
++	 */
++	if (cmd->use_shell) {
++		struct strvec words = STRVEC_INIT;
++		const char *p = argv.v[0];
++
++		if (strpbrk(p, "|&;<>()$`\\\"'*?[]{}#~\n")) {
++			errno = ENOSYS;
++			goto out;
++		}
++		while (*p) {
++			size_t len;
++			p += strspn(p, " \t");
++			len = strcspn(p, " \t");
++			if (len)
++				strvec_push_nodup(&words, xstrndup(p, len));
++			p += len;
++		}
++		if (!words.nr) {
++			strvec_clear(&words);
++			errno = EINVAL;
++			goto out;
++		}
++		for (i = 1; i < argv.nr; i++)
++			strvec_push(&words, argv.v[i]);
++		strvec_clear(&argv);
++		argv = words;
+ 	}
+ 
+-	if (!in && !cmd->no_stdin && cmd->in > 0) {
++	/*
++	 * eryx:process/run takes all of a command's input at once; a piped
++	 * command gets it streamed instead, below.
++	 */
++	if (!piped_slot && !in && !cmd->no_stdin && cmd->in > 0) {
+ 		if (strbuf_read(&input, cmd->in, 0) < 0)
+ 			goto out;
+ 		in = input.buf;
+@@ -152,10 +205,62 @@
+ 	c_stdin.len = in ? in_len : 0;
+ 
+ 	fflush(NULL);
++	if (piped_slot) {
++		eryx_process_pipe_own_piped_t own;
++		int slot, w;
++		if (!eryx_process_pipe_static_piped_spawn(&c_cmd, &c_args, &c_env, &c_cwd, &own, &run_err))
++			goto failed;
++		slot = wasi_piped_register(own.__handle);
++		if (slot < 0) {
++			/* Dropping it kills it. */
++			eryx_process_pipe_piped_drop_own(own);
++			errno = EAGAIN;
++			error(_("cannot run %s: too many piped commands"), argv.v[0]);
++			goto out;
++		}
++		*piped_slot = slot;
++		if (cmd->in < 0 && !cmd->no_stdin) {
++			cmd->in = wasi_piped_fd(slot, 1);
++		} else {
++			if (in) {
++				w = wasi_piped_fd(slot, 1);
++				write_in_full(w, in, in_len);
++				close(w);
++			} else if (!cmd->no_stdin && cmd->in > 0) {
++				/*
++				 * Its input is a file (start_async's spooled
++				 * output, for index-pack): stream it, rather than
++				 * holding all of it in memory.
++				 */
++				char buf[64 * 1024];
++				ssize_t n;
++				w = wasi_piped_fd(slot, 1);
++				while ((n = xread(cmd->in, buf, sizeof(buf))) > 0)
++					if (write_in_full(w, buf, n) < 0)
++						break;
++				close(w);
++			}
++			wasi_piped_close_stdin(slot);
++			if (cmd->in > 0)
++				close(cmd->in);
++		}
++		if (cmd->out < 0) {
++			cmd->out = wasi_piped_fd(slot, 0);
++			wasi_drain_to[slot] = -2;
++		} else {
++			wasi_drain_to[slot] = cmd->no_stdout ? -1 :
++				cmd->out > 0 ? cmd->out :
++				cmd->stdout_to_stderr ? 2 : 1;
++		}
++		cmd->pid = WASI_PIPED_PID + slot;
++		code = 0;
++		goto piped_out;
++	}
+ 	if (!eryx_process_run_run(&c_cmd, &c_args, &c_env, &c_cwd, &c_stdin, &ret, &run_err)) {
+ 		/* As a failed exec: -1 with errno, which aliases and the
+ 		 * "is not a git command" message look at. */
+ 		const char *why;
++failed:
+ 		switch (run_err) {
+ 		case ERYX_PROCESS_RUN_RUN_ERROR_COMMAND_NOT_FOUND:
+ 			errno = ENOENT;
+@@ -199,14 +304,15 @@
+ 		close(cmd->out);
+ 	if (cmd->err > 0)
+ 		close(cmd->err);
++	child_process_clear(cmd);
++	invalidate_lstat_cache();
++piped_out:
+ 	free(args);
+ 	free(pairs);
+ 	string_list_clear(&env, 0);
+ 	strbuf_release(&input);
+ 	strbuf_release(&cwd);
+ 	strvec_clear(&argv);
+-	child_process_clear(cmd);
+-	invalidate_lstat_cache();
+ 	if (code < 0)
+ 		errno = saved_errno;
+ 	return code;
+@@ -884,6 +990,17 @@
+ 		cmd->pid = WASI_DEFERRED_PID;
+ 		return 0;
+ 	}
++	/* Live pipes to it. Its stderr is always this process's. */
++	if (cmd->err < 0 && !cmd->no_stderr) {
++		errno = ENOSYS;
++		return -1;
++	}
++	{
++		int slot = -1;
++		if (wasi_run(cmd, NULL, 0, NULL, NULL, &slot) < 0 || slot < 0)
++			return -1;
++		return 0;
++	}
+ #endif
+ 
+ 	/*
+@@ -1210,7 +1327,16 @@
+ {
+ #ifdef __wasi__
+ 	if (cmd->pid == WASI_DEFERRED_PID)
+-		return wasi_run(cmd, NULL, 0, NULL, NULL);
++		return wasi_run(cmd, NULL, 0, NULL, NULL, NULL);
++	if (cmd->pid >= WASI_PIPED_PID && cmd->pid < WASI_PIPED_PID + WASI_PIPED_MAX) {
++		int slot = cmd->pid - WASI_PIPED_PID, code;
++		if (wasi_drain_to[slot] != -2)
++			wasi_piped_drain(slot, wasi_drain_to[slot]);
++		code = wasi_piped_wait(slot);
++		child_process_clear(cmd);
++		invalidate_lstat_cache();
++		return code;
++	}
+ #endif
+ 	int ret = wait_or_whine(cmd->pid, cmd->args.v[0], 0);
+ 	trace2_child_exit(cmd, ret);
+@@ -1371,6 +1497,45 @@
+ 
+ int start_async(struct async *async)
+ {
++#ifdef __wasi__
++	{
++		/*
++		 * No threads or fork: run it now, to completion, its output
++		 * spooled through a temp file that the caller then reads. So it
++		 * can't take input from a pipe, and a proc reading input the
++		 * caller only writes later (send-pack's receive-status demuxer)
++		 * must be started after that.
++		 */
++		char path[] = "/tmp/git-async-XXXXXX";
++		int proc_in = async->in > 0 ? async->in : -1, proc_out = -1, fd = -1;
++		if (async->in < 0) {
++			errno = ENOSYS;
++			return -1;
++		}
++		if (async->out < 0) {
++			fd = mkstemp(path);
++			if (fd < 0)
++				return -1;
++			proc_out = fd;
++		} else if (async->out > 0) {
++			proc_out = async->out;
++		}
++		async->pid = async->proc(proc_in, proc_out, async->data);
++		if (fd >= 0) {
++			async->out = open(path, O_RDONLY);
++			if (async->out < 0) {
++				unlink(path);
++				return -1;
++			}
++			/*
++			 * Removed once its reader closes it, not now: eryx's VFS
++			 * can't read a file after it's unlinked.
++			 */
++			wasi_unlink_on_close(async->out, path);
++		}
++		return 0;
++	}
++#endif
+ 	int need_in, need_out;
+ 	int fdin[2], fdout[2];
+ 	int proc_in, proc_out;
+@@ -1486,6 +1651,9 @@
+ 
+ int finish_async(struct async *async)
+ {
++#ifdef __wasi__
++	return async->pid;
++#endif
+ #ifdef NO_PTHREADS
+ 	int ret = wait_or_whine(async->pid, "child process", 0);
+ 
+@@ -1505,6 +1673,13 @@
+ 
+ int async_with_fork(void)
+ {
++#ifdef __wasi__
++	/*
++	 * start_async runs the proc inline, sharing this process's fds as a
++	 * thread would, so it mustn't close the caller's.
++	 */
++	return 0;
++#endif
+ #ifdef NO_PTHREADS
+ 	return 1;
+ #else
+@@ -1644,7 +1819,7 @@
+ 	int nr = 0;
+ 
+ #ifdef __wasi__
+-	return wasi_run(cmd, in, in_len, out, err);
++	return wasi_run(cmd, in, in_len, out, err, NULL);
+ #endif
+ 	if (in)
+ 		cmd->in = -1;
+--- a/send-pack.c
++++ b/send-pack.c
+@@ -694,6 +694,12 @@
+ 		packet_flush(out);
+ 	}
+ 
++#ifdef __wasi__
++	/*
++	 * start_async runs the demuxer to completion, so it can only start
++	 * once the request (and its pack) is sent: below.
++	 */
++#else
+ 	if (use_sideband && cmds_sent) {
+ 		memset(&demux, 0, sizeof(demux));
+ 		demux.proc = sideband_demux;
+@@ -704,6 +710,7 @@
+ 			die("send-pack: unable to fork off sideband demultiplexer");
+ 		in = demux.out;
+ 	}
++#endif
+ 
+ 	packet_reader_init(&reader, in, NULL, 0,
+ 			   PACKET_READ_CHOMP_NEWLINE |
+@@ -741,6 +748,23 @@
+ 	if (args->stateless_rpc && cmds_sent)
+ 		packet_flush(out);
+ 
++#ifdef __wasi__
++	if (use_sideband && cmds_sent) {
++		/* The flush above ended the request. */
++		memset(&demux, 0, sizeof(demux));
++		demux.proc = sideband_demux;
++		demux.data = fd;
++		demux.out = -1;
++		demux.isolate_sigpipe = 1;
++		if (start_async(&demux))
++			die("send-pack: unable to fork off sideband demultiplexer");
++		in = demux.out;
++	}
++	packet_reader_init(&reader, in, NULL, 0,
++			   PACKET_READ_CHOMP_NEWLINE |
++			   PACKET_READ_DIE_ON_ERR_PACKET);
++#endif
++
+ 	if (status_report && cmds_sent)
+ 		ret = receive_status(r, &reader, remote_refs);
+ 	else

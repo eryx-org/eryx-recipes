@@ -10,12 +10,19 @@
 # over eryx:process/run, so the subcommands git runs with no live pipe
 # (run_command) or with all their input up front (pipe_command) run through
 # the host: `stash`, `worktree add`, `gc` and the like work when the sandbox
-# registers git with `Command::allow_spawn`. Live pipes and start_async (C
-# git's transports, the pager) still fail with ENOSYS (eryx-org/eryx#815).
+# registers git with `Command::allow_spawn`. git-https.patch adds live pipes
+# over eryx:process/pipe (for its remote helpers, index-pack and the like),
+# runs start_async inline, and builds remote-curl into git itself, so
+# `clone`, `fetch` and `push` work over HTTP(S) with libcurl and Mbed TLS.
+# HTTPS goes through the sandbox's child proxy, whose CA libcurl trusts from
+# /etc/ssl/certs/ca-certificates.crt.
 
 name = "git"
 description = "git (C, Makefile; subcommands through eryx:process/run)"
-license = "GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT"
+# Mbed TLS is dual-licensed Apache-2.0 OR GPL-2.0-or-later; git takes it under
+# GPL-2.0-or-later, since Apache-2.0 can't be combined with GPL-2.0-only code
+# (see NOTICE.md).
+license = "GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT AND Zlib AND curl AND GPL-2.0-or-later"
 lang = "c"
 
 [source]
@@ -39,12 +46,84 @@ cmake_flags = [
     "-DZLIB_BUILD_EXAMPLES=OFF",
 ]
 
+# TLS for libcurl, built as clis/curl.toml builds it.
+[[deps]]
+name = "mbedtls"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
+ref = "3.6.6"
+sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
+# Taken under GPL-2.0-or-later here (see the license note above).
+license = "GPL-2.0-or-later"
+dir = "scratch/git-mbedtls"
+system = "cmake"
+include = "include"
+config_patch = "clis/patches/patch-mbedtls.sh"
+cflags = [
+    "-DMBEDTLS_NO_PLATFORM_ENTROPY",
+    "-DMBEDTLS_ENTROPY_HARDWARE_ALT",
+    "-DMBEDTLS_PLATFORM_MS_TIME_ALT",
+]
+cmake_flags = [
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DENABLE_TESTING=OFF",
+    "-DENABLE_PROGRAMS=OFF",
+    "-DUSE_STATIC_MBEDTLS_LIBRARY=ON",
+    "-DUSE_SHARED_MBEDTLS_LIBRARY=OFF",
+]
+shims = ["clis/shims/mbedtls-wasi.c"]
+
+# libcurl, for git's HTTP(S) transport: the same curl as clis/curl.toml, as a
+# static library against the Mbed TLS above, trusting the child proxy's CA.
+[[deps]]
+name = "curl"
+url = "https://github.com/curl/curl.git"
+ref = "curl-8_20_0"
+commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
+license = "curl"
+dir = "scratch/git-curl"
+system = "cmake"
+config_patch = "clis/patches/patch-curl.sh"
+cflags = [
+    "-DPOLLPRI=0",
+    "-D_WASI_EMULATED_SIGNAL",
+    "-mllvm", "-wasm-enable-sjlj",
+    "-DCURL_DISABLE_SOCKETPAIR",
+]
+cmake_flags = [
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DBUILD_CURL_EXE=OFF",
+    "-DBUILD_TESTING=OFF",
+    "-DBUILD_LIBCURL_DOCS=OFF",
+    "-DENABLE_CURL_MANUAL=OFF",
+    "-DCURL_ENABLE_SSL=ON",
+    "-DCURL_USE_MBEDTLS=ON",
+    "-DMBEDTLS_INCLUDE_DIR={dep:mbedtls:src}/include",
+    "-DMBEDTLS_LIBRARY={dep:mbedtls:build}/library/libmbedtls.a",
+    "-DMBEDX509_LIBRARY={dep:mbedtls:build}/library/libmbedx509.a",
+    "-DMBEDCRYPTO_LIBRARY={dep:mbedtls:build}/library/libmbedcrypto.a",
+    "-DCURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+    "-DCURL_CA_PATH=none",
+    "-DCURL_ZLIB=OFF",
+    "-DCURL_BROTLI=OFF",
+    "-DCURL_ZSTD=OFF",
+    "-DCURL_USE_LIBPSL=OFF",
+    "-DCURL_USE_LIBSSH2=OFF",
+    "-DUSE_NGHTTP2=OFF",
+    "-DUSE_LIBIDN2=OFF",
+    "-DCURL_USE_GSSAPI=OFF",
+    "-DCURL_USE_LIBUV=OFF",
+    "-DCURL_DISABLE_INSTALL=ON",
+    "-DENABLE_THREADED_RESOLVER=OFF",
+]
+
 [build]
 system = "make"
 artifact = "git"
 make_targets = ["git"]
 vendor_patch = "clis/gpl/git/patches/patch-git.sh"
-shims = ["clis/gpl/git/shims/wasi-git-stubs.c"]
+# wasi-pipes.c: file descriptors for live pipes to eryx:process/pipe children.
+shims = ["clis/gpl/git/shims/wasi-git-stubs.c", "clis/gpl/git/shims/wasi-pipes.c"]
 # The run-command.c backend's eryx:process/run bindings.
 wit = { path = "wit/process.wit", world = "eryx:process/child" }
 cflags = [
@@ -66,8 +145,11 @@ link_flags = [
     "-lwasi-emulated-getpid",
     "-lwasi-emulated-process-clocks",
     "-Wl,-z,stack-size=8388608",
+    # wasi-pipes.c's pipe file descriptors stand in for these on the fds it
+    # makes, and pass the rest through.
+    "-Wl,--wrap=read,--wrap=write,--wrap=close,--wrap=fdopen",
 ]
-# git's Makefile knobs for a platform without threads, mmap, curl, perl,
+# git's Makefile knobs for a platform without threads, mmap, perl,
 # gettext and the rest.
 make_flags = [
     "uname_S=WASI",
@@ -77,7 +159,8 @@ make_flags = [
     "uname_V=0",
     "NO_PTHREADS=YesPlease",
     "NO_MMAP=YesPlease",
-    "NO_CURL=YesPlease",
+    "CURL_CFLAGS=-I{dep:curl:src}/include -DCURL_STATICLIB",
+    "CURL_LDFLAGS={dep:curl:build}/lib/libcurl.a {dep:mbedtls:build}/library/libmbedtls.a {dep:mbedtls:build}/library/libmbedx509.a {dep:mbedtls:build}/library/libmbedcrypto.a",
     "NO_EXPAT=YesPlease",
     "NO_PERL=YesPlease",
     "NO_PYTHON=YesPlease",

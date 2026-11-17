@@ -28,30 +28,30 @@
 # The same build as eryx's embedded coreutils, from eryx's recipe
 # (eryx-commands#7).
 [eryx.coreutils]
-version = "0.9.0-r.1"
+version = "0.9.0-r.2"
 multicall = true
 fetched = "coreutils_rev"
 
 [eryx.curl]
-version = "8.20.0-r.1"
+version = "8.20.0-r.2"
 
 [eryx.gh]
-version = "2.87.3-r.1"
+version = "2.87.3-r.2"
 
 [eryx.jaq]
-version = "3.1.2-r.1"
+version = "3.1.2-r.2"
 
 [eryx.jq]
-version = "1.8.2-r.1"
+version = "1.8.2-r.2"
 
 [eryx.rg]
-version = "15.1.0-r.1"
+version = "15.1.0-r.2"
 
 [eryx.sd]
-version = "1.1.0-r.1"
+version = "1.1.0-r.2"
 
 [eryx.sqlite3]
-version = "3.53.2-r.1"
+version = "3.53.2-r.2"
 
 [eryx-gpl.git]
-version = "2.56.1-r.1"
+version = "2.56.1-r.2"
