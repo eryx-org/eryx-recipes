@@ -282,11 +282,11 @@ artifacts = ["rg", "sd", "jaq", "coreutils"]
 
 [[component]]
 name = "The Go standard library (wasip3 fork)"
-version = "wasip3-0.3.0-go1.27.4 (dfb22bf4)"
+version = "wasip3-0.3.0-go1.27.4 (7161a5d7)"
 license = "BSD-3-Clause"
-url = "https://github.com/sd2k/go/tree/dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+url = "https://github.com/sd2k/go/tree/7161a5d745661ab60fb6f87b92aad12c0124f65b"
 # The Go lane's standard library and runtime: Go 1.27.4 ported to WASI 0.3
 # (scripts/bootstrap-go-wasip3.sh). Go's LICENSE and its patent grant.
 files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
-go_fork_commit = "dfb22bf4bbf14406a17de2ec48cc9af3e45649a0"
+go_fork_commit = "7161a5d745661ab60fb6f87b92aad12c0124f65b"
 artifacts = ["gh"]

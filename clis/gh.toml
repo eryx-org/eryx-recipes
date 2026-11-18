@@ -1,6 +1,8 @@
 # Build manifest for the GitHub CLI (`gh`) as a WASI component.
 # Built by `mise run build-cli -- gh`, which needs the wasip3 Go fork
-# (scripts/bootstrap-go-wasip3.sh, or set ERYX_GO_WASIP3_ROOT).
+# (scripts/bootstrap-go-wasip3.sh, or set ERYX_GO_WASIP3_ROOT). The script
+# sets GOWASM=widearith in the toolchain's go.env, so the component uses
+# wasm wide-arithmetic, which wasmtime (and so eryx) enables by default.
 #
 # At runtime gh needs a real (non-symlinked) /etc/resolv.conf, a CA bundle
 # (SSL_CERT_FILE or certs under /etc), and the component-model async flags
@@ -22,10 +24,13 @@ dir = "scratch/gh-cli"
 [build]
 # Go package to build, relative to the source dir.
 package = "./cmd/gh"
-# Script applied after `go mod vendor` to stub out wasip3-incompatible code.
+# Script applied after `go mod vendor` to stub out wasip3-incompatible code,
+# speed up startup and leave out `codespace`, `attestation` and `release
+# verify[-asset]` (clis/patches/gh-*.patch).
 vendor_patch = "clis/patches/patch-gh-vendor.sh"
-# Report the pinned release instead of `DEV`.
-ldflags = "-X github.com/cli/cli/v2/internal/build.Version={version}"
+# Report the pinned release instead of `DEV`. `-s` drops the wasm name
+# section (2.2 MB); Go's own panics still name functions, from pclntab.
+ldflags = "-s -X github.com/cli/cli/v2/internal/build.Version={version}"
 
 [component]
 # wasm-tools component world to embed.

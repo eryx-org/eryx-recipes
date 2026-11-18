@@ -36,7 +36,7 @@ fetched = "coreutils_rev"
 version = "8.20.0-r.2"
 
 [eryx.gh]
-version = "2.87.3-r.2"
+version = "2.87.3-r.3"
 
 [eryx.jaq]
 version = "3.1.2-r.2"

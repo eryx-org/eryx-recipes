@@ -73,7 +73,8 @@ LANE_ENTRIES = {
 }
 
 # The Go lane's target (eryx-build's lanes/go.rs) and toolchain: the wasip3
-# fork that scripts/bootstrap-go-wasip3.sh pins and builds.
+# fork that scripts/bootstrap-go-wasip3.sh pins and builds. GOWASM comes from
+# that toolchain's go.env, as it does for eryx-build.
 GO_ENV = {"GOOS": "wasip3", "GOARCH": "wasm32"}
 GO_BOOTSTRAP = ROOT / "scripts" / "bootstrap-go-wasip3.sh"
 

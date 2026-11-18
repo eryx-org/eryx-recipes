@@ -1,0 +1,239 @@
+diff --git a/vendor/github.com/alecthomas/chroma/v2/lexers/lexers.go b/vendor/github.com/alecthomas/chroma/v2/lexers/lexers.go
+--- a/vendor/github.com/alecthomas/chroma/v2/lexers/lexers.go
++++ b/vendor/github.com/alecthomas/chroma/v2/lexers/lexers.go
+@@ -3,6 +3,7 @@ package lexers
+ import (
+ 	"embed"
+ 	"io/fs"
++	"sync"
+ 
+ 	"github.com/alecthomas/chroma/v2"
+ )
+@@ -11,8 +12,33 @@ import (
+ var embedded embed.FS
+ 
+ // GlobalLexerRegistry is the global LexerRegistry of Lexers.
+-var GlobalLexerRegistry = func() *chroma.LexerRegistry {
+-	reg := chroma.NewLexerRegistry()
++//
++// eryx: the embedded XML lexers are parsed on first lookup (ensureXML) rather
++// than at init. Lexers registered from Go before then are queued and
++// registered after the XML ones, in the same order as before.
++var GlobalLexerRegistry = chroma.NewLexerRegistry()
++
++var (
++	xmlOnce   sync.Once
++	xmlLoaded bool
++	pending   []chroma.Lexer
++)
++
++func ensureXML() {
++	xmlOnce.Do(func() {
++		loadXML(GlobalLexerRegistry)
++		for _, lexer := range pending {
++			GlobalLexerRegistry.Register(lexer)
++		}
++		pending = nil
++		xmlLoaded = true
++		initDNS()
++		initMySQL()
++		initZed()
++	})
++}
++
++func loadXML(reg *chroma.LexerRegistry) {
+ 	// index(reg)
+ 	paths, err := fs.Glob(embedded, "embedded/*.xml")
+ 	if err != nil {
+@@ -21,17 +47,18 @@ var GlobalLexerRegistry = func() *chroma.LexerRegistry {
+ 	for _, path := range paths {
+ 		reg.Register(chroma.MustNewXMLLexer(embedded, path))
+ 	}
+-	return reg
+-}()
++}
+ 
+ // Names of all lexers, optionally including aliases.
+ func Names(withAliases bool) []string {
++	ensureXML()
+ 	return GlobalLexerRegistry.Names(withAliases)
+ }
+ 
+ // Aliases of all the lexers, and skip those lexers who do not have any aliases,
+ // or show their name instead
+ func Aliases(skipWithoutAliases bool) []string {
++	ensureXML()
+ 	return GlobalLexerRegistry.Aliases(skipWithoutAliases)
+ }
+ 
+@@ -40,11 +67,13 @@ func Aliases(skipWithoutAliases bool) []string {
+ // Note that this if there isn't an exact match on name or alias, this will
+ // call Match(), so it is not efficient.
+ func Get(name string) chroma.Lexer {
++	ensureXML()
+ 	return GlobalLexerRegistry.Get(name)
+ }
+ 
+ // MatchMimeType attempts to find a lexer for the given MIME type.
+ func MatchMimeType(mimeType string) chroma.Lexer {
++	ensureXML()
+ 	return GlobalLexerRegistry.MatchMimeType(mimeType)
+ }
+ 
+@@ -53,16 +82,23 @@ func MatchMimeType(mimeType string) chroma.Lexer {
+ // Note that this iterates over all file patterns in all lexers, so it's not
+ // particularly efficient.
+ func Match(filename string) chroma.Lexer {
++	ensureXML()
+ 	return GlobalLexerRegistry.Match(filename)
+ }
+ 
+ // Register a Lexer with the global registry.
+ func Register(lexer chroma.Lexer) chroma.Lexer {
++	if !xmlLoaded {
++		lexer.SetRegistry(GlobalLexerRegistry)
++		pending = append(pending, lexer)
++		return lexer
++	}
+ 	return GlobalLexerRegistry.Register(lexer)
+ }
+ 
+ // Analyse text content and return the "best" lexer..
+ func Analyse(text string) chroma.Lexer {
++	ensureXML()
+ 	return GlobalLexerRegistry.Analyse(text)
+ }
+ 
+diff --git a/vendor/github.com/alecthomas/chroma/v2/lexers/dns.go b/vendor/github.com/alecthomas/chroma/v2/lexers/dns.go
+--- a/vendor/github.com/alecthomas/chroma/v2/lexers/dns.go
++++ b/vendor/github.com/alecthomas/chroma/v2/lexers/dns.go
+@@ -7,8 +7,9 @@ import (
+ // TODO(moorereason): can this be factored away?
+ var zoneAnalyserRe = regexp.MustCompile(`(?m)^@\s+IN\s+SOA\s+`)
+ 
+-func init() { // nolint: gochecknoinits
+-	Get("dns").SetAnalyser(func(text string) float32 {
++// eryx: was init(); ensureXML runs it once the XML lexers are loaded.
++func initDNS() {
++	GlobalLexerRegistry.Get("dns").SetAnalyser(func(text string) float32 {
+ 		if zoneAnalyserRe.FindString(text) != "" {
+ 			return 1.0
+ 		}
+diff --git a/vendor/github.com/alecthomas/chroma/v2/lexers/mysql.go b/vendor/github.com/alecthomas/chroma/v2/lexers/mysql.go
+--- a/vendor/github.com/alecthomas/chroma/v2/lexers/mysql.go
++++ b/vendor/github.com/alecthomas/chroma/v2/lexers/mysql.go
+@@ -9,8 +9,9 @@ var (
+ 	mysqlAnalyserNameBetweenBracketRe  = regexp.MustCompile(`\[[a-zA-Z_]\w*\]`)
+ )
+ 
+-func init() { // nolint: gochecknoinits
+-	Get("mysql").
++// eryx: was init(); ensureXML runs it once the XML lexers are loaded.
++func initMySQL() {
++	GlobalLexerRegistry.Get("mysql").
+ 		SetAnalyser(func(text string) float32 {
+ 			nameBetweenBacktickCount := len(mysqlAnalyserNameBetweenBacktickRe.FindAllString(text, -1))
+ 			nameBetweenBracketCount := len(mysqlAnalyserNameBetweenBracketRe.FindAllString(text, -1))
+diff --git a/vendor/github.com/alecthomas/chroma/v2/lexers/zed.go b/vendor/github.com/alecthomas/chroma/v2/lexers/zed.go
+--- a/vendor/github.com/alecthomas/chroma/v2/lexers/zed.go
++++ b/vendor/github.com/alecthomas/chroma/v2/lexers/zed.go
+@@ -5,8 +5,9 @@ import (
+ )
+ 
+ // Zed lexer.
+-func init() { // nolint: gochecknoinits
+-	Get("Zed").SetAnalyser(func(text string) float32 {
++// eryx: was init(); ensureXML runs it once the XML lexers are loaded.
++func initZed() {
++	GlobalLexerRegistry.Get("Zed").SetAnalyser(func(text string) float32 {
+ 		if strings.Contains(text, "definition ") && strings.Contains(text, "relation ") && strings.Contains(text, "permission ") {
+ 			return 0.9
+ 		}
+diff --git a/vendor/github.com/alecthomas/chroma/v2/styles/api.go b/vendor/github.com/alecthomas/chroma/v2/styles/api.go
+--- a/vendor/github.com/alecthomas/chroma/v2/styles/api.go
++++ b/vendor/github.com/alecthomas/chroma/v2/styles/api.go
+@@ -4,6 +4,7 @@ import (
+ 	"embed"
+ 	"io/fs"
+ 	"sort"
++	"sync"
+ 
+ 	"github.com/alecthomas/chroma/v2"
+ )
+@@ -12,7 +13,27 @@ import (
+ var embedded embed.FS
+ 
+ // Registry of Styles.
+-var Registry = func() map[string]*chroma.Style {
++//
++// eryx: filled from the embedded XML styles on first use (Get, Names, Has)
++// rather than at init. Read it through those.
++var Registry = map[string]*chroma.Style{}
++
++var loadOnce sync.Once
++
++func load() {
++	loadOnce.Do(func() {
++		for k, v := range loadAll() {
++			if _, ok := Registry[k]; !ok {
++				Registry[k] = v
++			}
++		}
++		if Fallback == nil {
++			Fallback = Registry["swapoff"]
++		}
++	})
++}
++
++func loadAll() map[string]*chroma.Style {
+ 	registry := map[string]*chroma.Style{}
+ 	// Register all embedded styles.
+ 	files, err := fs.ReadDir(embedded, ".")
+@@ -35,10 +56,17 @@ var Registry = func() map[string]*chroma.Style {
+ 		_ = r.Close()
+ 	}
+ 	return registry
+-}()
++}
+ 
+ // Fallback style. Reassign to change the default fallback style.
+-var Fallback = Registry["swapoff"]
++var Fallback *chroma.Style
++
++// Has reports whether a style is registered.
++func Has(name string) bool {
++	load()
++	_, ok := Registry[name]
++	return ok
++}
+ 
+ // Register a chroma.Style.
+ func Register(style *chroma.Style) *chroma.Style {
+@@ -48,6 +76,7 @@ func Register(style *chroma.Style) *chroma.Style {
+ 
+ // Names of all available styles.
+ func Names() []string {
++	load()
+ 	out := []string{}
+ 	for name := range Registry {
+ 		out = append(out, name)
+@@ -58,6 +87,7 @@ func Names() []string {
+ 
+ // Get named style, or Fallback.
+ func Get(name string) *chroma.Style {
++	load()
+ 	if style, ok := Registry[name]; ok {
+ 		return style
+ 	}
+diff --git a/vendor/github.com/charmbracelet/glamour/ansi/codeblock.go b/vendor/github.com/charmbracelet/glamour/ansi/codeblock.go
+--- a/vendor/github.com/charmbracelet/glamour/ansi/codeblock.go
++++ b/vendor/github.com/charmbracelet/glamour/ansi/codeblock.go
+@@ -87,7 +87,7 @@ func (e *CodeBlockElement) Render(w io.Writer, ctx RenderContext) error {
+ 		theme = chromaStyleTheme
+ 		mutex.Lock()
+ 		// Don't register the style if it's already registered.
+-		_, ok := styles.Registry[theme]
++		ok := styles.Has(theme)
+ 		if !ok {
+ 			styles.Register(chroma.MustNewStyle(theme,
+ 				chroma.StyleEntries{

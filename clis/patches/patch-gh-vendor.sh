@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Patches gh CLI's vendored dependencies for wasip3/wasm32 compilation.
-# Run from the gh-cli directory after `go mod vendor`.
+# Patches gh CLI's vendored dependencies for wasip3/wasm32 compilation, then
+# applies the gh-*.patch files beside it. Run from the gh-cli directory after
+# `go mod vendor`. Idempotent.
 set -euo pipefail
+
+dir="$(dirname "${BASH_SOURCE[0]}")"
 
 V=vendor
 
@@ -169,3 +172,30 @@ sed -i 's|// +build linux darwin !windows|// +build !wasip3|' \
     "$V/github.com/in-toto/in-toto-golang/in_toto/util_unix.go"
 
 echo "=== Done. Patched $(find $V -name '*wasip3*' | wc -l) stub files ==="
+
+echo "=== Applying patches ==="
+
+# `go mod vendor` rewrites vendor/ on every build, so the vendor patch always
+# applies again. The others change gh's own sources, which stay patched in the
+# checkout between builds, so skip one that's already in.
+apply() {
+    if git apply --reverse --check "$dir/$1" 2>/dev/null; then
+        echo "$1: already applied"
+    else
+        git apply "$dir/$1"
+        echo "$1: applied"
+    fi
+}
+# Startup: chroma's styles and XML lexers load on first use rather than in
+# init(), and `gh help reference` builds its text when it's shown rather than
+# on every start. Together they cut `gh --version` from ~840M to ~295M wasm
+# instructions.
+apply gh-lazy-init-vendor.patch
+apply gh-lazy-init.patch
+# GOGC=400 unless GOGC is set: gh is short-lived, and at the default about a
+# third of startup goes on collecting its package inits' garbage.
+apply gh-gogc.patch
+# No `codespace`, `attestation`, `release verify` or `release verify-asset`:
+# they link sigstore, TUF, protobuf, gRPC, go-openapi, mongo-driver and
+# dev-tunnels, about a third of the binary.
+apply gh-drop-codespace-attestation.patch

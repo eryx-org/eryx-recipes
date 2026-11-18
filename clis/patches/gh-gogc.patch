@@ -1,0 +1,39 @@
+diff --git a/cmd/gh/main.go b/cmd/gh/main.go
+index e167bc6..c70b5f8 100644
+--- a/cmd/gh/main.go
++++ b/cmd/gh/main.go
+@@ -3,6 +3,9 @@ package main
+ import (
+ 	"os"
+ 
++	// eryx: GOGC=400 unless GOGC is set; before the other inits.
++	_ "github.com/cli/cli/v2/internal/gogc"
++
+ 	"github.com/cli/cli/v2/internal/ghcmd"
+ )
+ 
+diff --git a/internal/gogc/gogc.go b/internal/gogc/gogc.go
+new file mode 100644
+index 0000000..6c5aef1
+--- /dev/null
++++ b/internal/gogc/gogc.go
+@@ -0,0 +1,19 @@
++// Package gogc makes gh collect garbage less often than Go's default
++// (GOGC=100) unless GOGC is set. gh is short-lived and its package inits make
++// a lot of garbage, so on wasm the default spends about a third of startup in
++// the collector. eryx: added for the wasip3 build.
++//
++// cmd/gh imports it first, so it runs before the other packages' inits (they
++// depend on more than os and runtime/debug).
++package gogc
++
++import (
++	"os"
++	"runtime/debug"
++)
++
++func init() {
++	if os.Getenv("GOGC") == "" {
++		debug.SetGCPercent(400)
++	}
++}

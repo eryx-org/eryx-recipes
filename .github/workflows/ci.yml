@@ -296,7 +296,8 @@ jobs:
           cache: false
       - uses: ./.github/actions/eryx-build
       # Building the fork from source takes ~10 minutes; key it on the script,
-      # which pins the fork's commit.
+      # which pins the fork's commit and the GOWASM it writes to go.env. Go's
+      # build cache isn't kept, so a new toolchain always builds fresh.
       - name: Cache wasip3 Go toolchain
         id: go-wasip3-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
