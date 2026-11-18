@@ -1,6 +1,8 @@
 # Build manifest for the GitHub CLI (`gh`) as a WASI component.
 # Built by `mise run build-cli -- gh`, which needs the wasip3 Go fork
-# (scripts/bootstrap-go-wasip3.sh, or set ERYX_GO_WASIP3_ROOT).
+# (scripts/bootstrap-go-wasip3.sh, or set ERYX_GO_WASIP3_ROOT). The script
+# sets GOWASM=widearith in the toolchain's go.env, so the component uses
+# wasm wide-arithmetic, which wasmtime (and so eryx) enables by default.
 #
 # At runtime gh needs a real (non-symlinked) /etc/resolv.conf, a CA bundle
 # (SSL_CERT_FILE or certs under /etc), and the component-model async flags
