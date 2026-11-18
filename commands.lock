@@ -54,6 +54,11 @@ requirement = "=2.87.3-r.2"
 version = "2.87.3-r.2"
 digest = "sha256:71f6649a1602c47903e40ab243812a685097c7900eba601e1d4fc8b748bc27c9"
 
+[[packages.versions]]
+requirement = "=2.87.3-r.3"
+version = "2.87.3-r.3"
+digest = "sha256:609bd7da3b2c20123b31158fa578aa50bc8d4c0da755f9b160f214611f71c3f0"
+
 [[packages]]
 name = "eryx:jaq"
 
