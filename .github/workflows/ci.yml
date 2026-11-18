@@ -134,7 +134,7 @@ jobs:
           # check-versions diffs against the PR's base.
           fetch-depth: 0
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           install_args: rust
@@ -171,7 +171,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           # cargo-about for the notices.
@@ -230,7 +230,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           # wit-bindgen for git's bindings, wasm-tools for its smoke check.
@@ -289,7 +289,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           install_args: rust cargo:wasm-tools aqua:bytecodealliance/wasmtime
@@ -359,7 +359,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           install_args: rust cargo:wkg aqua:sigstore/cosign aqua:oras-project/oras
@@ -441,7 +441,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-binstall
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           install_args: rust cargo:wkg
@@ -505,7 +505,7 @@ jobs:
           # A source offer is made from the commit a command was published
           # from, which a re-run may sign after main has moved on.
           fetch-depth: 0
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
           install_args: aqua:sigstore/cosign aqua:oras-project/oras
