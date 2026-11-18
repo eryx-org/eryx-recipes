@@ -22,10 +22,13 @@ dir = "scratch/gh-cli"
 [build]
 # Go package to build, relative to the source dir.
 package = "./cmd/gh"
-# Script applied after `go mod vendor` to stub out wasip3-incompatible code.
+# Script applied after `go mod vendor` to stub out wasip3-incompatible code,
+# speed up startup and leave out `codespace`, `attestation` and `release
+# verify[-asset]` (clis/patches/gh-*.patch).
 vendor_patch = "clis/patches/patch-gh-vendor.sh"
-# Report the pinned release instead of `DEV`.
-ldflags = "-X github.com/cli/cli/v2/internal/build.Version={version}"
+# Report the pinned release instead of `DEV`. `-s` drops the wasm name
+# section (2.2 MB); Go's own panics still name functions, from pclntab.
+ldflags = "-s -X github.com/cli/cli/v2/internal/build.Version={version}"
 
 [component]
 # wasm-tools component world to embed.

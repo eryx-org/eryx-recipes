@@ -1,0 +1,191 @@
+diff --git a/pkg/cmd/root/root.go b/pkg/cmd/root/root.go
+--- a/pkg/cmd/root/root.go
++++ b/pkg/cmd/root/root.go
+@@ -12,11 +12,9 @@ import (
+ 	aliasCmd "github.com/cli/cli/v2/pkg/cmd/alias"
+ 	"github.com/cli/cli/v2/pkg/cmd/alias/shared"
+ 	apiCmd "github.com/cli/cli/v2/pkg/cmd/api"
+-	attestationCmd "github.com/cli/cli/v2/pkg/cmd/attestation"
+ 	authCmd "github.com/cli/cli/v2/pkg/cmd/auth"
+ 	browseCmd "github.com/cli/cli/v2/pkg/cmd/browse"
+ 	cacheCmd "github.com/cli/cli/v2/pkg/cmd/cache"
+-	codespaceCmd "github.com/cli/cli/v2/pkg/cmd/codespace"
+ 	completionCmd "github.com/cli/cli/v2/pkg/cmd/completion"
+ 	configCmd "github.com/cli/cli/v2/pkg/cmd/config"
+ 	copilotCmd "github.com/cli/cli/v2/pkg/cmd/copilot"
+@@ -131,7 +129,6 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command,
+ 	cmd.AddCommand(actionsCmd.NewCmdActions(f))
+ 	cmd.AddCommand(aliasCmd.NewCmdAlias(f))
+ 	cmd.AddCommand(authCmd.NewCmdAuth(f))
+-	cmd.AddCommand(attestationCmd.NewCmdAttestation(f))
+ 	cmd.AddCommand(configCmd.NewCmdConfig(f))
+ 	cmd.AddCommand(gistCmd.NewCmdGist(f))
+ 	cmd.AddCommand(gpgKeyCmd.NewCmdGPGKey(f))
+@@ -141,7 +138,6 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command,
+ 	cmd.AddCommand(secretCmd.NewCmdSecret(f))
+ 	cmd.AddCommand(variableCmd.NewCmdVariable(f))
+ 	cmd.AddCommand(sshKeyCmd.NewCmdSSHKey(f))
+-	cmd.AddCommand(codespaceCmd.NewCmdCodespace(f))
+ 	cmd.AddCommand(projectCmd.NewCmdProject(f))
+ 	cmd.AddCommand(previewCmd.NewCmdPreview(f))
+ 
+diff --git a/pkg/cmd/release/release.go b/pkg/cmd/release/release.go
+index f56042c..6805b09 100644
+--- a/pkg/cmd/release/release.go
++++ b/pkg/cmd/release/release.go
+@@ -8,8 +8,6 @@ import (
+ 	cmdUpdate "github.com/cli/cli/v2/pkg/cmd/release/edit"
+ 	cmdList "github.com/cli/cli/v2/pkg/cmd/release/list"
+ 	cmdUpload "github.com/cli/cli/v2/pkg/cmd/release/upload"
+-	cmdVerify "github.com/cli/cli/v2/pkg/cmd/release/verify"
+-	cmdVerifyAsset "github.com/cli/cli/v2/pkg/cmd/release/verify-asset"
+ 	cmdView "github.com/cli/cli/v2/pkg/cmd/release/view"
+ 	"github.com/cli/cli/v2/pkg/cmdutil"
+ 	"github.com/spf13/cobra"
+@@ -36,8 +34,6 @@ func NewCmdRelease(f *cmdutil.Factory) *cobra.Command {
+ 		cmdDownload.NewCmdDownload(f, nil),
+ 		cmdDelete.NewCmdDelete(f, nil),
+ 		cmdDeleteAsset.NewCmdDeleteAsset(f, nil),
+-		cmdVerify.NewCmdVerify(f, nil),
+-		cmdVerifyAsset.NewCmdVerifyAsset(f, nil),
+ 	)
+ 
+ 	return cmd
+diff --git a/pkg/cmd/release/shared/attestation.go b/pkg/cmd/release/shared/attestation.go
+deleted file mode 100644
+index 6599029..0000000
+--- a/pkg/cmd/release/shared/attestation.go
++++ /dev/null
+@@ -1,132 +0,0 @@
+-package shared
+-
+-import (
+-	"fmt"
+-	"net/http"
+-
+-	"github.com/cli/cli/v2/pkg/cmd/attestation/api"
+-	"github.com/cli/cli/v2/pkg/cmd/attestation/artifact"
+-	att_io "github.com/cli/cli/v2/pkg/cmd/attestation/io"
+-	"github.com/cli/cli/v2/pkg/cmd/attestation/test/data"
+-	"github.com/cli/cli/v2/pkg/cmd/attestation/verification"
+-	"github.com/cli/cli/v2/pkg/iostreams"
+-	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
+-	"github.com/sigstore/sigstore-go/pkg/verify"
+-
+-	v1 "github.com/in-toto/attestation/go/v1"
+-	"google.golang.org/protobuf/encoding/protojson"
+-)
+-
+-type Verifier interface {
+-	// VerifyAttestation verifies the attestation for a given artifact
+-	VerifyAttestation(art *artifact.DigestedArtifact, att *api.Attestation) (*verification.AttestationProcessingResult, error)
+-}
+-
+-type AttestationVerifier struct {
+-	AttClient   api.Client
+-	HttpClient  *http.Client
+-	IO          *iostreams.IOStreams
+-	TrustedRoot string
+-}
+-
+-func (v *AttestationVerifier) VerifyAttestation(art *artifact.DigestedArtifact, att *api.Attestation) (*verification.AttestationProcessingResult, error) {
+-	td, err := v.AttClient.GetTrustDomain()
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	verifier, err := verification.NewLiveSigstoreVerifier(verification.SigstoreConfig{
+-		HttpClient:   v.HttpClient,
+-		Logger:       att_io.NewHandler(v.IO),
+-		NoPublicGood: true,
+-		TrustDomain:  td,
+-		TrustedRoot:  v.TrustedRoot,
+-	})
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	policy := buildVerificationPolicy(*art, td)
+-	sigstoreVerified, err := verifier.Verify([]*api.Attestation{att}, policy)
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	return sigstoreVerified[0], nil
+-}
+-
+-func FilterAttestationsByTag(attestations []*api.Attestation, tagName string) ([]*api.Attestation, error) {
+-	var filtered []*api.Attestation
+-	for _, att := range attestations {
+-		statement := att.Bundle.Bundle.GetDsseEnvelope().Payload
+-		var statementData v1.Statement
+-		err := protojson.Unmarshal([]byte(statement), &statementData)
+-		if err != nil {
+-			return nil, fmt.Errorf("failed to unmarshal statement: %w", err)
+-		}
+-		tagValue := statementData.Predicate.GetFields()["tag"].GetStringValue()
+-
+-		if tagValue == tagName {
+-			filtered = append(filtered, att)
+-		}
+-	}
+-	return filtered, nil
+-}
+-
+-func FilterAttestationsByFileDigest(attestations []*api.Attestation, fileDigest string) ([]*api.Attestation, error) {
+-	var filtered []*api.Attestation
+-	for _, att := range attestations {
+-		statement := att.Bundle.Bundle.GetDsseEnvelope().Payload
+-		var statementData v1.Statement
+-		err := protojson.Unmarshal([]byte(statement), &statementData)
+-
+-		if err != nil {
+-			return nil, fmt.Errorf("failed to unmarshal statement: %w", err)
+-		}
+-		subjects := statementData.Subject
+-		for _, subject := range subjects {
+-			digestMap := subject.GetDigest()
+-			alg := "sha256"
+-
+-			digest := digestMap[alg]
+-			if digest == fileDigest {
+-				filtered = append(filtered, att)
+-			}
+-		}
+-
+-	}
+-	return filtered, nil
+-}
+-
+-// buildVerificationPolicy constructs a verification policy for GitHub releases
+-func buildVerificationPolicy(a artifact.DigestedArtifact, trustDomain string) verify.PolicyBuilder {
+-	// If no trust domain is specified, default to "dotcom"
+-	if trustDomain == "" {
+-		trustDomain = "dotcom"
+-	}
+-	// SAN must match the GitHub releases domain. No issuer extension (match anything)
+-	sanMatcher, _ := verify.NewSANMatcher("", fmt.Sprintf("^https://%s\\.releases\\.github\\.com$", trustDomain))
+-	issuerMatcher, _ := verify.NewIssuerMatcher("", ".*")
+-	certId, _ := verify.NewCertificateIdentity(sanMatcher, issuerMatcher, certificate.Extensions{})
+-
+-	artifactDigestPolicyOption, _ := verification.BuildDigestPolicyOption(a)
+-	return verify.NewPolicy(artifactDigestPolicyOption, verify.WithCertificateIdentity(certId))
+-}
+-
+-type MockVerifier struct {
+-	mockResult *verification.AttestationProcessingResult
+-}
+-
+-func NewMockVerifier(mockResult *verification.AttestationProcessingResult) *MockVerifier {
+-	return &MockVerifier{mockResult: mockResult}
+-}
+-
+-func (v *MockVerifier) VerifyAttestation(art *artifact.DigestedArtifact, att *api.Attestation) (*verification.AttestationProcessingResult, error) {
+-	return &verification.AttestationProcessingResult{
+-		Attestation: &api.Attestation{
+-			Bundle:    data.GitHubReleaseBundle(nil),
+-			BundleURL: "https://example.com",
+-		},
+-		VerificationResult: nil,
+-	}, nil
+-}

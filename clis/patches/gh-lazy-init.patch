@@ -1,0 +1,62 @@
+diff --git a/cmd/gen-docs/main.go b/cmd/gen-docs/main.go
+index 60fd8af..de4ac78 100644
+--- a/cmd/gen-docs/main.go
++++ b/cmd/gen-docs/main.go
+@@ -54,6 +54,7 @@ func run(args []string) error {
+ 		},
+ 		ExtensionManager: &em{},
+ 	}, "", "")
++	root.SetReferenceLong(rootCmd)
+ 	rootCmd.InitDefaultHelpCmd()
+ 
+ 	if err := os.MkdirAll(*dir, 0755); err != nil {
+diff --git a/pkg/cmd/root/help_reference.go b/pkg/cmd/root/help_reference.go
+index fb2e74a..c31512b 100644
+--- a/pkg/cmd/root/help_reference.go
++++ b/pkg/cmd/root/help_reference.go
+@@ -41,8 +41,12 @@ func longPager(io *iostreams.IOStreams) func(*cobra.Command, []string) {
+ }
+ 
+ func stringifyReference(cmd *cobra.Command) string {
++	return stringifyReferenceOf(cmd.Commands())
++}
++
++func stringifyReferenceOf(commands []*cobra.Command) string {
+ 	buf := bytes.NewBufferString("# gh reference\n\n")
+-	for _, c := range cmd.Commands() {
++	for _, c := range commands {
+ 		if c.Hidden {
+ 			continue
+ 		}
+diff --git a/pkg/cmd/root/root.go b/pkg/cmd/root/root.go
+index ed33f56..73ec7e1 100644
+--- a/pkg/cmd/root/root.go
++++ b/pkg/cmd/root/root.go
+@@ -236,7 +236,25 @@ func NewCmdRoot(f *cmdutil.Factory, version, buildDate string) (*cobra.Command,
+ 	// We experimented with producing the paged output dynamically when the HelpFunc is called but since
+ 	// doc generation makes use of the Long text, it is simpler to just be explicit here that this command
+ 	// is special.
+-	referenceCmd.Long = stringifyReference(cmd)
+-	referenceCmd.SetHelpFunc(longPager(f.IOStreams))
++	//
++	// eryx: build the Long text when the reference is shown rather than on every start, from the
++	// top-level commands as they are now, so cobra's default help command (added at Execute time)
++	// stays out of it as before. Doc generation calls SetReferenceLong instead.
++	topLevel := append([]*cobra.Command(nil), cmd.Commands()...)
++	pager := longPager(f.IOStreams)
++	referenceCmd.SetHelpFunc(func(c *cobra.Command, args []string) {
++		c.Long = stringifyReferenceOf(topLevel)
++		pager(c, args)
++	})
+ 	return cmd, nil
+ }
++
++// SetReferenceLong sets the reference help topic's Long text, for doc generation. Call it right
++// after NewCmdRoot.
++func SetReferenceLong(cmd *cobra.Command) {
++	for _, c := range cmd.Commands() {
++		if c.Name() == "reference" {
++			c.Long = stringifyReference(cmd)
++		}
++	}
++}
