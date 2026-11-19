@@ -1,18 +1,459 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 8abea8e..3ea9f48 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -466,7 +466,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 3.0.3",
++ "syn 3.0.10",
+ ]
+ 
+ [[package]]
+@@ -566,6 +566,7 @@ dependencies = [
+  "uucore",
+  "uutests",
+  "walkdir",
++ "wit-bindgen",
+ ]
+ 
+ [[package]]
+@@ -613,6 +614,12 @@ dependencies = [
+  "thiserror",
+ ]
+ 
++[[package]]
++name = "foldhash"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
++
+ [[package]]
+ name = "futures-core"
+ version = "0.3.33"
+@@ -688,6 +695,15 @@ name = "hashbrown"
+ version = "0.17.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++dependencies = [
++ "foldhash",
++]
++
++[[package]]
++name = "heck"
++version = "0.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
+ [[package]]
+ name = "hermit-abi"
+@@ -719,6 +735,12 @@ dependencies = [
+  "cc",
+ ]
+ 
++[[package]]
++name = "id-arena"
++version = "2.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
++
+ [[package]]
+ name = "indexmap"
+ version = "2.14.0"
+@@ -727,6 +749,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+ dependencies = [
+  "equivalent",
+  "hashbrown",
++ "serde",
++ "serde_core",
+ ]
+ 
+ [[package]]
+@@ -859,6 +883,12 @@ version = "1.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+ 
++[[package]]
++name = "leb128fmt"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
++
+ [[package]]
+ name = "libc"
+ version = "0.2.189"
+@@ -889,6 +919,17 @@ version = "0.4.33"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+ 
++[[package]]
++name = "macro-string"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6e7b3a5bbb2f63aaa223a671ea1bd0e7bc16bd30ce387324cf63995deaddbbd2"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.10",
++]
++
+ [[package]]
+ name = "memchr"
+ version = "2.8.3"
+@@ -1101,6 +1142,16 @@ dependencies = [
+  "yansi",
+ ]
+ 
++[[package]]
++name = "prettyplease"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
++dependencies = [
++ "proc-macro2",
++ "syn 3.0.10",
++]
++
+ [[package]]
+ name = "proc-macro-crate"
+ version = "3.5.0"
+@@ -1326,7 +1377,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 3.0.3",
++ "syn 3.0.10",
+ ]
+ 
+ [[package]]
+@@ -1399,9 +1450,9 @@ dependencies = [
+ 
+ [[package]]
+ name = "syn"
+-version = "3.0.3"
++version = "3.0.10"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
++checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -1454,7 +1505,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn 3.0.3",
++ "syn 3.0.10",
+ ]
+ 
+ [[package]]
+@@ -1711,6 +1762,40 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "wasm-encoder"
++version = "0.262.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4495a6f85dd94c411c749303efcbc5defade0b0cbdbc0541495241ab917a9b5a"
++dependencies = [
++ "leb128fmt",
++ "wasmparser",
++]
++
++[[package]]
++name = "wasm-metadata"
++version = "0.262.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c86ff6668190d9fb70372b306b4f9fe8930f0e2f57ce72e4922bf2f117900949"
++dependencies = [
++ "anyhow",
++ "indexmap",
++ "wasm-encoder",
++ "wasmparser",
++]
++
++[[package]]
++name = "wasmparser"
++version = "0.262.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "974d643b125b272607e2fff8012ea14a8328acd7621e4bafa7afb32500052b1b"
++dependencies = [
++ "bitflags 2.13.1",
++ "hashbrown",
++ "indexmap",
++ "semver",
++]
++
+ [[package]]
+ name = "web-sys"
+ version = "0.3.103"
+@@ -1911,6 +1996,97 @@ dependencies = [
+  "memchr",
+ ]
+ 
++[[package]]
++name = "wit-bindgen"
++version = "0.63.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b85a987ab61d365382d25c7d47e26edd48941b3bf6e3fbf76eff918bc71dab06"
++dependencies = [
++ "bitflags 2.13.1",
++ "wit-bindgen-rust-macro",
++]
++
++[[package]]
++name = "wit-bindgen-core"
++version = "0.63.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "775e122e390603abfacd548027016cd0113a6e2bf2f8ce6bdd3658b013456ea8"
++dependencies = [
++ "anyhow",
++ "heck",
++ "wit-parser",
++]
++
++[[package]]
++name = "wit-bindgen-rust"
++version = "0.63.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "84e26e13b9d972026778d2ffb7985736de116026fdc8d9464f966e12df2eb240"
++dependencies = [
++ "anyhow",
++ "heck",
++ "indexmap",
++ "prettyplease",
++ "syn 3.0.10",
++ "wasm-metadata",
++ "wit-bindgen-core",
++ "wit-component",
++]
++
++[[package]]
++name = "wit-bindgen-rust-macro"
++version = "0.63.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "16a008a0d6b4840677326beb4edbeb210a2f1b7d0183fb7cc33f466b90fd7fb6"
++dependencies = [
++ "anyhow",
++ "macro-string",
++ "prettyplease",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.10",
++ "wit-bindgen-core",
++ "wit-bindgen-rust",
++]
++
++[[package]]
++name = "wit-component"
++version = "0.262.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "078def49fdb49cab405c3006e05793b3fdaf7069126ba6b9c97d01ec8c98fe4c"
++dependencies = [
++ "anyhow",
++ "bitflags 2.13.1",
++ "indexmap",
++ "log",
++ "serde",
++ "serde_derive",
++ "serde_json",
++ "wasm-encoder",
++ "wasm-metadata",
++ "wasmparser",
++ "wit-parser",
++]
++
++[[package]]
++name = "wit-parser"
++version = "0.262.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "00f0dc051466ffe46787721fca3d088536f158ae400be044f1b1c386ba9397ad"
++dependencies = [
++ "anyhow",
++ "hashbrown",
++ "id-arena",
++ "indexmap",
++ "log",
++ "semver",
++ "serde",
++ "serde_derive",
++ "serde_json",
++ "unicode-ident",
++ "wasmparser",
++]
++
+ [[package]]
+ name = "xattr"
+ version = "1.6.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index 54cb21b..8303008 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -36,6 +36,9 @@ thiserror = "2.0.12"
+ # unification until uucore does it itself.
+ [target.'cfg(target_os = "wasi")'.dependencies]
+ rustix = { version = "1.1.4", default-features = false, features = ["std"] }
++# eryx: bindings for eryx:process/run, which -exec runs its commands through
++# (src/find/matchers/eryx_run.rs).
++wit-bindgen = "=0.63.0"
+ 
+ [dev-dependencies]
+ criterion = { version = "4.7.0", package = "codspeed-criterion-compat" }
+diff --git a/src/find/matchers/eryx_run.rs b/src/find/matchers/eryx_run.rs
+new file mode 100644
+index 0000000..c440d72
+--- /dev/null
++++ b/src/find/matchers/eryx_run.rs
+@@ -0,0 +1,88 @@
++// eryx: -exec and -execdir on WASI. A WASI command can't start another one,
++// so find runs its commands through the host's eryx:process/run, as git does.
++// The host runs them only if it lets find spawn; their output is captured,
++// so it shows once each has exited, and they get no stdin.
++
++use std::ffi::OsStr;
++use std::io::{self, Write};
++use std::process::Command;
++
++use eryx::process::run::{run, RunError};
++
++wit_bindgen::generate!({
++    inline: "package eryx:find; world exec { import eryx:process/run@0.1.0; }",
++    path: "wit/process.wit",
++    generate_all,
++});
++
++/// How a command ended: what `std::process::ExitStatus` tells upstream.
++pub struct Status(i32);
++
++impl Status {
++    pub fn success(&self) -> bool {
++        self.0 == 0
++    }
++}
++
++fn utf8(s: &OsStr) -> io::Result<String> {
++    s.to_str().map(str::to_owned).ok_or_else(|| {
++        io::Error::new(
++            io::ErrorKind::InvalidInput,
++            format!("{} isn't valid UTF-8", s.to_string_lossy()),
++        )
++    })
++}
++
++/// Run `command` (its program, arguments and working directory) through the
++/// host, with find's environment, and write out what it printed.
++pub fn status(command: &Command) -> io::Result<Status> {
++    let program = utf8(command.get_program())?;
++    let args = command
++        .get_args()
++        .map(utf8)
++        .collect::<io::Result<Vec<_>>>()?;
++    let mut cwd = std::env::current_dir()?;
++    if let Some(dir) = command.get_current_dir() {
++        // components() drops the `.` -execdir's directories start with.
++        cwd = cwd.join(dir).components().collect();
++    }
++    let cwd = utf8(cwd.as_os_str())?;
++    // The host takes the child's directory from PWD when it's set, and
++    // find's own is: replace it with the command's.
++    let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k != "PWD").collect();
++    env.push(("PWD".to_owned(), cwd.clone()));
++
++    let mut output = run(&program, &args, &env, &cwd, &[]);
++    // The shell's builtins (echo, true, its grep) aren't commands the host
++    // can run, so run one through `sh`, which has them.
++    // ponytail: an extra spawn per miss; drop it once eryx:process/run runs
++    // the shell's builtins itself.
++    if let Err(RunError::CommandNotFound) = output {
++        let mut sh_args = vec![
++            "-c".to_owned(),
++            "\"$@\"".to_owned(),
++            "sh".to_owned(),
++            program.clone(),
++        ];
++        sh_args.extend(args.iter().cloned());
++        if let Ok(ran) = run("sh", &sh_args, &env, &cwd, &[]) {
++            // sh's 127: not a builtin either.
++            if ran.status != 127 {
++                output = Ok(ran);
++            }
++        }
++    }
++    let output = output.map_err(|e| match e {
++        RunError::CommandNotFound => io::Error::new(io::ErrorKind::NotFound, "command not found"),
++        RunError::SpawnFailed => io::Error::other(
++            "the host couldn't run it, or doesn't let find run commands (spawn-failed)",
++        ),
++        RunError::LimitExceeded => {
++            io::Error::other("the host's limits on child processes were reached (limit-exceeded)")
++        }
++    })?;
++    io::stdout().write_all(&output.stdout)?;
++    io::stdout().flush()?;
++    io::stderr().write_all(&output.stderr)?;
++    Ok(Status(output.status))
++}
+diff --git a/src/find/matchers/exec.rs b/src/find/matchers/exec.rs
+index f117004..99c2d43 100644
+--- a/src/find/matchers/exec.rs
++++ b/src/find/matchers/exec.rs
+@@ -155,7 +155,12 @@ impl Matcher for SingleExecMatcher {
+                 }
+             }
+         }
+-        match command.status() {
++        // eryx: through the host on WASI (see eryx_run).
++        #[cfg(target_os = "wasi")]
++        let status = super::eryx_run::status(&command);
++        #[cfg(not(target_os = "wasi"))]
++        let status = command.status();
++        match status {
+             Ok(status) => status.success(),
+             Err(e) => {
+                 writeln!(
+@@ -206,7 +211,11 @@ impl MultiExecMatcher {
+     }
+ 
+     fn run_command(&self, command: &mut argmax::Command, matcher_io: &mut MatcherIO) {
+-        match command.status() {
++        #[cfg(target_os = "wasi")]
++        let status = super::eryx_run::status(command);
++        #[cfg(not(target_os = "wasi"))]
++        let status = command.status();
++        match status {
+             Ok(status) => {
+                 if !status.success() {
+                     matcher_io.set_exit_code(1);
+diff --git a/src/find/matchers/mod.rs b/src/find/matchers/mod.rs
+index 59d1154..31e5f65 100644
 --- a/src/find/matchers/mod.rs
 +++ b/src/find/matchers/mod.rs
-@@ -855,6 +855,17 @@
+@@ -9,6 +9,8 @@ mod delete;
+ mod empty;
+ mod entry;
+ pub mod exec;
++#[cfg(target_os = "wasi")]
++mod eryx_run;
+ pub mod fs;
+ mod glob;
+ mod group;
+@@ -855,6 +857,19 @@ fn build_matcher_tree(
                  Some(SizeMatcher::new(size, &unit)?.into_box())
              }
              Predicate::Empty => Some(EmptyMatcher::new().into_box()),
-+            // eryx: a WASI sandbox can't start the command, and upstream
-+            // reports that per file but still exits 0 for `-exec ... ;`.
-+            // Refuse the expression up front instead.
++            // eryx: -exec and -execdir run their commands through the host
++            // (eryx_run), but -ok and -okdir would prompt on stdin, which a
++            // command find runs from the sandbox's shell doesn't have.
++            // Refuse them up front.
 +            #[cfg(target_os = "wasi")]
-+            Predicate::Exec | Predicate::Prompt => {
++            Predicate::Prompt => {
 +                return Err(From::from(format!(
-+                    "{}: not supported here: find can't run commands in this sandbox. \
-+                     Use `find ... -print0 | xargs -0 COMMAND` instead",
-+                    args[i]
++                    "{}: not supported here: find can't prompt in this sandbox. \
++                     Use {} instead",
++                    args[i],
++                    if args[i] == "-okdir" { "-execdir" } else { "-exec" }
 +                )));
 +            }
              Predicate::Exec => {

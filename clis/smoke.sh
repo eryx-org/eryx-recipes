@@ -140,7 +140,9 @@ awk)
     expect "$out" "a pipe to a command isn't supported in this sandbox"
     ;;
 find)
-    findw() { wasmtime run --dir "$WORK/data::/data" "$OUT/component.wasm" "$@" 2>&1; }
+    # find imports eryx:process/run for -exec, which only eryx provides, so
+    # stub it with a trap here: -exec and -execdir only run inside eryx.
+    findw() { wasmtime run -W unknown-imports-trap --dir "$WORK/data::/data" "$OUT/component.wasm" "$@" 2>&1; }
     mkdir -p "$WORK/data/sub"
     printf 'x\n' > "$WORK/data/sub/notes.log"
     : > "$WORK/data/empty.txt"
@@ -153,17 +155,14 @@ find)
     if grep -q notes.log <<< "$out"; then echo "::error::find: -prune didn't prune"; exit 1; fi
     expect "$(findw /data/sub -type f -printf '%f %s\n')" "notes.log 2"
     expect "$(findw /data -name notes.log -print0 | tr '\0' '|')" "/data/sub/notes.log|"
-    # -exec can't run anything here: it must fail up front, not exit 0.
-    for action in -exec -execdir -ok; do
+    expect "$(wasm-tools component wit "$OUT/component.wasm")" "import eryx:process/run@0.1.0;"
+    # -ok and -okdir would prompt, so must fail up front, not exit 0.
+    for action in -ok -okdir; do
         if out="$(findw /data -name fruit.txt "$action" cat {} \;)"; then
             echo "::error::find: $action succeeded"; exit 1
         fi
-        expect "$out" "xargs -0"
+        expect "$out" "find can't prompt in this sandbox"
     done
-    if out="$(findw /data -name fruit.txt -exec cat {} +)"; then
-        echo "::error::find: -exec + succeeded"; exit 1
-    fi
-    expect "$out" "find can't run commands in this sandbox"
     ;;
 sqlite3)
     expect "$(wasmtime run "$OUT/component.wasm" :memory: 'select 6*7;')" 42
