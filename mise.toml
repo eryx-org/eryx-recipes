@@ -48,11 +48,11 @@ wasi_sdk_version = "wasi-sdk-33"
 # (eryx-org/eryx#997) it's installed from git at this commit. It needs to be
 # at least eryx-org/eryx#1004, whose provenance.json records the eryx-build
 # version and the WIT imports the registry annotations come from.
-eryx_rev = "4390151144bcb58941ab0f637c91691ed8ff2629"
+eryx_rev = "1f04d02e674b5010ce7f8408a7300befeef77819"
 # The eryx commit coreutils' recipe (clis/coreutils.toml and its uucore patch)
 # is fetched from: eryx keeps building it for its embedded coreutils, and we
 # publish the same build. `mise run bump-coreutils` moves it.
-coreutils_rev = "d1f8b9e19abb524fbf5bb49e8f8cda2ce8ebac38"
+coreutils_rev = "b65e7e53ae02029a878f58a312634721a2d6eaa9"
 # google/licenseclassifier's identify_license, which classifies a Go
 # command's module licence files for its notices. Installed with the host
 # Go into scratch/tools, like eryx-build.
