@@ -1,0 +1,53 @@
+# Build manifest for awk (`awk`) as a WASI (wasip2) component, via the C lane.
+# Built by `mise run build-cli -- awk` (needs bison, the WASI SDK and the
+# wasmtime CLI: see clis/patches/patch-awk.sh).
+#
+# The One True Awk (Brian Kernighan's awk, as the BSDs and macOS ship it). Its
+# pipes (`cmd | getline`, `print | cmd`) and system() need a shell, which a
+# WASI command can't start: clis/shims/awk-wasi.c makes them fail with a
+# message. Like every C-lane command for now, an exit status above 1 comes
+# back as 1 (wasi-libc's exit only reports success or failure).
+
+name = "awk"
+description = "awk — the One True Awk, without pipes or system() (C, wasip2)"
+# SPDX expression for the upstream source, recorded in provenance.json.
+# LICENSE is Lucent's 1997 permission notice, which matches the SPDX SMLNJ
+# template (the holder's names are replaceable, "that" is optional).
+license = "SMLNJ"
+lang = "c"
+
+[source]
+repo = "https://github.com/onetrueawk/awk.git"
+ref = "20261106"
+commit = "72e9b56caddb4a6f8d1405315a5183c26b8650a4"
+dir = "scratch/awk"
+
+[build]
+# Generates the parser and proctab.c, as awk's makefile would.
+vendor_patch = "clis/patches/patch-awk.sh"
+sources = [
+    "awkgram.tab.c", "b.c", "main.c", "parse.c", "proctab.c",
+    "tran.c", "lib.c", "run.c", "lex.c", "math.c",
+]
+shims = ["clis/shims/awk-wasi.c"]
+cflags = [
+    "-O2",
+    # `exit` longjmps out of the program. Use wasm exception handling with
+    # exnref: the legacy encoding needs an engine feature eryx doesn't enable.
+    "-mllvm", "-wasm-enable-sjlj",
+    "-mllvm", "-wasm-use-legacy-eh=false",
+    "-Ieryx-include",                 # <sys/wait.h> (patch-awk.sh)
+    "-D_WASI_EMULATED_SIGNAL",        # signal() via the emulation lib
+]
+link_flags = [
+    "-lm",
+    "-lsetjmp",
+    "-lwasi-emulated-signal",
+]
+
+[cwasm]
+# Loaded as a plain component; the host compiles it on demand.
+enabled = false
+
+[output]
+dir = "scratch/awk-component"

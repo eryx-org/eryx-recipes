@@ -1,0 +1,17 @@
+--- a/src/sed/processor.rs
++++ b/src/sed/processor.rs
+@@ -236,6 +236,14 @@
+     command: &Command,
+     context: &mut ProcessingContext,
+ ) -> UResult<Vec<u8>> {
++    // eryx: a WASI sandbox has no shell to run the command in. Fail the
++    // script cleanly rather than panicking in shell_command.
++    #[cfg(not(any(unix, windows)))]
++    return input_runtime_error(
++        &command.location,
++        context,
++        "the 'e' command and the s///e flag aren't supported here: sed can't run shell commands in this sandbox",
++    );
+     let os_cmd = os_string_from_bytes(cmd).map_err(|e| {
+         input_runtime_error::<()>(
+             &command.location,

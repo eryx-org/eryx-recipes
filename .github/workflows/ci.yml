@@ -2,8 +2,8 @@
 # smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
 # Which lanes run when:
-# - Rust (rg, sd, jaq, and coreutils from eryx's recipe) and C (sqlite3, curl,
-#   jq, git): when the build pins (mise.toml), this workflow, smoke.sh or one
+# - Rust (rg, sd, jaq, sed, find, and coreutils from eryx's recipe) and C
+#   (sqlite3, curl, jq, awk, git): when the build pins (mise.toml), this workflow, smoke.sh or one
 #   of the lane's manifests, patches, shims or WIT change.
 # - Go (gh): only when its manifest, patch or the Go-fork bootstrap change. It
 #   builds the wasip3 Go fork from source (cached), so it is the slow one.
@@ -102,11 +102,19 @@ jobs:
               - 'clis/jaq.toml'
               - 'clis/patches/patch-sd-wasip2.sh'
               - 'clis/patches/patch-jaq-wasip2.sh'
+              - 'clis/sed.toml'
+              - 'clis/find.toml'
+              - 'clis/patches/patch-sed.sh'
+              - 'clis/patches/sed-wasi.patch'
+              - 'clis/patches/patch-find.sh'
+              - 'clis/patches/find-wasi.patch'
             c:
               - *driver
               - 'clis/curl.toml'
               - 'clis/sqlite3.toml'
               - 'clis/jq.toml'
+              - 'clis/awk.toml'
+              - 'clis/patches/patch-awk.sh'
               - 'clis/patches/patch-curl.sh'
               - 'clis/patches/patch-mbedtls.sh'
               - 'clis/shims/**'
@@ -165,7 +173,7 @@ jobs:
       matrix:
         # coreutils is built from eryx's recipe, fetched at vars.coreutils_rev
         # in mise.toml (so the driver filter covers its pin).
-        cli: [rg, sd, jaq, coreutils]
+        cli: [rg, sd, jaq, sed, find, coreutils]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -179,6 +187,9 @@ jobs:
           cache: false
       - uses: ./.github/actions/eryx-build
       - run: rustup target add wasm32-wasip2
+      # find's onig crate compiles Oniguruma's C with the WASI SDK's clang.
+      - if: matrix.cli == 'find'
+        run: mise run ensure-wasi-sdk
       - if: matrix.cli == 'coreutils'
         run: mise run fetch-coreutils
       - run: mise run build-cli -- "$CLI"
@@ -220,7 +231,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cli: [sqlite3, curl, jq, git]
+        cli: [sqlite3, curl, jq, awk, git]
         include:
           # GPL recipes live apart, in clis/gpl/ (eryx-org/eryx#837).
           - cli: git
@@ -237,8 +248,9 @@ jobs:
           install_args: rust aqua:bytecodealliance/wasmtime github:bytecodealliance/wit-bindgen cargo:wasm-tools
           cache: false
       - uses: ./.github/actions/eryx-build
-      # The CMake builds use Ninja, which the runner doesn't ship.
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      # The CMake builds use Ninja, and awk's parser needs bison; the runner
+      # ships neither.
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build bison
       # Every C build links the rustc-built start-in-$PWD object (eryx-org/eryx#978).
       - run: rustup target add wasm32-wasip2
       - run: mise run ensure-wasi-sdk

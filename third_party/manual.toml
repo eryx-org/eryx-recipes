@@ -96,6 +96,48 @@ cli_dep = "onig"
 cli_sha256 = "2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05"
 
 [[component]]
+name = "uutils sed"
+version = "0.3.0 (3b464d11)"
+license = "MIT"
+url = "https://github.com/uutils/sed/tree/3b464d115afddedf2271ff7b3d9564aa2103d752"
+files = ["third_party/licenses/sed-LICENSE"]
+artifacts = ["sed"]
+cli = "clis/sed.toml"
+cli_commit = "3b464d115afddedf2271ff7b3d9564aa2103d752"
+
+[[component]]
+name = "uutils findutils"
+version = "0.11.0 (2cb3adea)"
+license = "MIT"
+url = "https://github.com/uutils/findutils/tree/2cb3adea013fbbe4c01750224183c95d8900416f"
+files = ["third_party/licenses/findutils-LICENSE"]
+artifacts = ["find"]
+cli = "clis/find.toml"
+cli_commit = "2cb3adea013fbbe4c01750224183c95d8900416f"
+
+[[component]]
+name = "Oniguruma (bundled in onig_sys 69.9.3)"
+version = "6.9.10"
+license = "BSD-2-Clause"
+url = "https://github.com/rust-onig/rust-onig/tree/main/onig_sys/oniguruma"
+# find's -regex library: the onig_sys crate (MIT, listed with the crates)
+# compiles the Oniguruma source it bundles into find. Its COPYING is the same
+# as jq's 6.9.10 release's. Update it with onig_sys in findutils' Cargo.lock.
+files = ["third_party/licenses/oniguruma-COPYING"]
+artifacts = ["find"]
+
+[[component]]
+name = "The One True Awk"
+version = "20261106 (72e9b56c)"
+# Lucent's 1997 permission notice, which matches the SPDX SMLNJ template.
+license = "SMLNJ"
+url = "https://github.com/onetrueawk/awk/tree/72e9b56caddb4a6f8d1405315a5183c26b8650a4"
+files = ["third_party/licenses/awk-LICENSE"]
+artifacts = ["awk"]
+cli = "clis/awk.toml"
+cli_commit = "72e9b56caddb4a6f8d1405315a5183c26b8650a4"
+
+[[component]]
 name = "curl"
 version = "8.20.0 (a05f3497)"
 license = "curl"
@@ -224,7 +266,7 @@ files = [
     "third_party/licenses/wasi-libc-musl-fts-COPYING",
 ]
 wasi_sdk = "wasi-sdk-33"
-artifacts = ["jq", "curl", "sqlite3", "git"]
+artifacts = ["jq", "curl", "sqlite3", "awk", "git"]
 
 [[component]]
 name = "LLVM compiler-rt builtins (WASI SDK)"
@@ -234,7 +276,7 @@ url = "https://github.com/llvm/llvm-project/tree/4434dabb69916856b824f68a64b029c
 # clang links libclang_rt.builtins into every wasm program it builds.
 files = ["third_party/licenses/llvm-compiler-rt-LICENSE.TXT"]
 wasi_sdk = "wasi-sdk-33"
-artifacts = ["jq", "curl", "sqlite3", "git"]
+artifacts = ["jq", "curl", "sqlite3", "awk", "git"]
 
 [[component]]
 name = "wasi-libc (Rust's wasm targets)"
@@ -259,7 +301,7 @@ files = [
 ]
 rust_toolchain = "1.100.0"
 sysroot_strings = { paths = ["lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a"], strings = ["llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141"] }
-artifacts = ["rg", "sd", "jaq", "coreutils"]
+artifacts = ["rg", "sd", "jaq", "sed", "find", "coreutils"]
 
 [[component]]
 name = "The Rust standard library"
@@ -278,7 +320,7 @@ files = [
     "third_party/licenses/rust-Unicode-3.0.txt",
 ]
 rust_toolchain = "1.100.0"
-artifacts = ["rg", "sd", "jaq", "coreutils"]
+artifacts = ["rg", "sd", "jaq", "sed", "find", "coreutils"]
 
 [[component]]
 name = "The Go standard library (wasip3 fork)"
