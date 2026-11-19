@@ -18,6 +18,18 @@ expect() {
     grep -qF -- "$2" <<< "$1" || { echo "::error::$NAME: expected '$2' in the output above"; exit 1; }
 }
 
+# Fail unless running "${@:2}" exits with status $1, showing its stderr if not.
+expect_status() {
+    local want="$1" status=0 err
+    shift
+    err="$("$@" 2>&1 > /dev/null)" || status=$?
+    [ "$status" = "$want" ] || {
+        printf '%s\n' "$err"
+        echo "::error::$NAME: expected exit status $want from $*, got $status"
+        exit 1
+    }
+}
+
 case "$NAME" in
 coreutils)
     # The precompiled cwasm needs the engine flags it was compiled with.
@@ -28,6 +40,12 @@ coreutils)
     expect "$(cu sort /data/fruit.txt | head -1)" apple
     expect "$(cu wc -l /data/fruit.txt)" 3
     expect "$(cu ls /data)" fruit.txt
+    # Character devices read like files (eryx-org/eryx#1102). Preopen the
+    # host's /dev for this one read.
+    status=0
+    wasmtime run --allow-precompiled -W component-model-async --dir /dev::/dev \
+        --argv0 cat "$OUT/coreutils.cwasm" /dev/null || status=$?
+    [ "$status" = 0 ] || { echo "::error::coreutils: cat /dev/null exited $status"; exit 1; }
     ;;
 rg)
     expect "$(wasmtime run --dir "$WORK/data::/data" "$OUT/component.wasm" -n an /data/fruit.txt)" "1:banana"
@@ -59,6 +77,14 @@ jq)
     fi
     # Upstream jq truncates a fractional index (jaq rejects it).
     expect "$(jqw -n '[1,2] | .[1.5]')" 2
+    # jq's exit statuses come through, not just 1 (as native jq 1.8.2): -e on
+    # false is 1, a usage error 2, a compile error 3, unparseable input 5,
+    # and halt_error its own.
+    expect_status 1 jqw -n -e false
+    expect_status 2 jqw --no-such-flag
+    expect_status 3 jqw -n '.['
+    expect_status 5 jqw . <<< '{'
+    expect_status 6 jqw -n '"x" | halt_error(6)'
     ;;
 sed)
     sedw() { wasmtime run --dir "$WORK/data::/data" "$OUT/component.wasm" "$@"; }
@@ -87,10 +113,11 @@ awk)
     expect "$(awkw 'BEGIN{printf "%-3s|%05.1f\n", "x", 2.5}')" "x  |002.5"
     expect "$(awkw 'function f(n){return n<=1?1:n*f(n-1)} BEGIN{print f(10)}')" 3628800
     expect "$(awkw '{n++} END{print n}' /data/fruit.txt)" 3
-    # `exit` longjmps out of the program (the sjlj build). Only check
-    # success and failure: C-lane exit statuses above 1 come back as 1.
+    # `exit` longjmps out of the program (the sjlj build), and its status
+    # comes through as is (eryx-build's exit-code shim, eryx-org/eryx#1106).
     expect "$(printf 'a\nb\n' | awkw '{print; exit} END{print "end"}' | tr '\n' ' ')" "a end"
-    if awkw 'BEGIN{exit 1}'; then echo "::error::awk: exit 1 succeeded"; exit 1; fi
+    expect_status 1 awkw 'BEGIN{exit 1}'
+    expect_status 3 awkw 'BEGIN{exit 3}'
     # Pipes and system() need a shell: they fail, saying why.
     expect "$(awkw 'BEGIN{r = system("true"); print "r=" r}' 2>&1)" "r=-1"
     expect "$(awkw 'BEGIN{r = system("true")}' 2>&1)" "system() isn't supported in this sandbox"
