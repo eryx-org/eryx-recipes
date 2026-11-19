@@ -47,7 +47,9 @@ wasi_sdk_version = "wasi-sdk-33"
 # (wit/process.wit) git is built against. Until eryx-build is on crates.io
 # (eryx-org/eryx#997) it's installed from git at this commit. It needs to be
 # at least eryx-org/eryx#1004, whose provenance.json records the eryx-build
-# version and the WIT imports the registry annotations come from.
+# version and the WIT imports the registry annotations come from, and
+# eryx-org/eryx#1106, whose exit-code shim lets C commands exit with statuses
+# above 1 (the smoke tests check them).
 eryx_rev = "1f04d02e674b5010ce7f8408a7300befeef77819"
 # The eryx commit coreutils' recipe (clis/coreutils.toml and its uucore patch)
 # is fetched from: eryx keeps building it for its embedded coreutils, and we

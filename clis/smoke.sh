@@ -18,12 +18,16 @@ expect() {
     grep -qF -- "$2" <<< "$1" || { echo "::error::$NAME: expected '$2' in the output above"; exit 1; }
 }
 
-# Fail unless running "${@:2}" exits with status $1.
+# Fail unless running "${@:2}" exits with status $1, showing its stderr if not.
 expect_status() {
-    local want="$1" status=0
+    local want="$1" status=0 err
     shift
-    "$@" > /dev/null 2>&1 || status=$?
-    [ "$status" = "$want" ] || { echo "::error::$NAME: expected exit status $want from $*, got $status"; exit 1; }
+    err="$("$@" 2>&1 > /dev/null)" || status=$?
+    [ "$status" = "$want" ] || {
+        printf '%s\n' "$err"
+        echo "::error::$NAME: expected exit status $want from $*, got $status"
+        exit 1
+    }
 }
 
 case "$NAME" in

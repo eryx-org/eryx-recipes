@@ -5,8 +5,8 @@
 # The One True Awk (Brian Kernighan's awk, as the BSDs and macOS ship it). Its
 # pipes (`cmd | getline`, `print | cmd`) and system() need a shell, which a
 # WASI command can't start: clis/shims/awk-wasi.c makes them fail with a
-# message. Like every C-lane command for now, an exit status above 1 comes
-# back as 1 (wasi-libc's exit only reports success or failure).
+# message. Its exit statuses come through as is, via eryx-build's exit-code
+# shim (eryx-org/eryx#1106).
 
 name = "awk"
 description = "awk — the One True Awk, without pipes or system() (C, wasip2)"
