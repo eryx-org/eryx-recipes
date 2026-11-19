@@ -1,0 +1,20 @@
+--- a/src/find/matchers/mod.rs
++++ b/src/find/matchers/mod.rs
+@@ -855,6 +855,17 @@
+                 Some(SizeMatcher::new(size, &unit)?.into_box())
+             }
+             Predicate::Empty => Some(EmptyMatcher::new().into_box()),
++            // eryx: a WASI sandbox can't start the command, and upstream
++            // reports that per file but still exits 0 for `-exec ... ;`.
++            // Refuse the expression up front instead.
++            #[cfg(target_os = "wasi")]
++            Predicate::Exec | Predicate::Prompt => {
++                return Err(From::from(format!(
++                    "{}: not supported here: find can't run commands in this sandbox. \
++                     Use `find ... -print0 | xargs -0 COMMAND` instead",
++                    args[i]
++                )));
++            }
+             Predicate::Exec => {
+                 let mut arg_index = i + 1;
+                 while arg_index < args.len()

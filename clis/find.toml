@@ -1,0 +1,37 @@
+# Build manifest for find (`find`) as a WASI (wasip2) component, via the Rust
+# lane. Built by `mise run build-cli -- find`.
+#
+# uutils findutils' `find` (only that binary: not xargs, which eryx's shell
+# provides as a builtin, nor locate/updatedb). It builds for wasip2 as it is,
+# with oniguruma (for -regex) compiled in by the onig crate. The patch makes
+# -exec, -execdir, -ok and -okdir fail up front, pointing at
+# `find ... -print0 | xargs -0`: a WASI command can't start another one, and
+# upstream would report that per file and still exit 0. -perm, -user and
+# -group fail too (WASI has no modes or owners), and -ls shows no modes.
+
+name = "find"
+description = "find — uutils findutils' find, without -exec (Rust, wasip2)"
+# SPDX expression for the upstream source, recorded in provenance.json.
+# findutils is MIT; the onig crate builds Oniguruma (BSD-2-Clause) into it,
+# which its notices list with the other crates.
+license = "MIT"
+lang = "rust"
+
+[source]
+repo = "https://github.com/uutils/findutils.git"
+ref = "0.11.0"
+commit = "2cb3adea013fbbe4c01750224183c95d8900416f"
+dir = "scratch/findutils"
+
+[build]
+bin = "find"
+vendor_patch = "clis/patches/patch-find.sh"
+[build.env]
+RUSTC_BOOTSTRAP = "1"
+
+[cwasm]
+# Loaded as a plain component; the host compiles it on demand.
+enabled = false
+
+[output]
+dir = "scratch/find-component"
