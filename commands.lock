@@ -15,6 +15,19 @@ requirement = "=2.56.1-r.2"
 version = "2.56.1-r.2"
 digest = "sha256:387502da2e137c5a47b28f74748063efa163b61f3cda46dd09962f085c5f748b"
 
+[[packages.versions]]
+requirement = "=2.56.1-r.3"
+version = "2.56.1-r.3"
+digest = "sha256:eb949bf236f136129da0b86e90ef5915378abec162ba263fa93aa465418a6f16"
+
+[[packages]]
+name = "eryx:awk"
+
+[[packages.versions]]
+requirement = "=20261106.0.0-r.2"
+version = "20261106.0.0-r.2"
+digest = "sha256:fb6c9b391479637c71e13884d658cc35ef6511de56c1827783399261de74f80b"
+
 [[packages]]
 name = "eryx:coreutils"
 
@@ -28,6 +41,11 @@ requirement = "=0.9.0-r.2"
 version = "0.9.0-r.2"
 digest = "sha256:68b00fbd44f3e771dd94355afc5f04b82b607afd039dfe8e8bc9049cea0a9526"
 
+[[packages.versions]]
+requirement = "=0.9.0-r.3"
+version = "0.9.0-r.3"
+digest = "sha256:39f02646830877379aad3c875cb5ee20235e01d8dbad4dc94db91099eafb0a1d"
+
 [[packages]]
 name = "eryx:curl"
 
@@ -40,6 +58,19 @@ digest = "sha256:f4b178d80f801ccaafc83049bc0295aeb0be854c071bd7dcdbc97ce78e9fa70
 requirement = "=8.20.0-r.2"
 version = "8.20.0-r.2"
 digest = "sha256:f4b178d80f801ccaafc83049bc0295aeb0be854c071bd7dcdbc97ce78e9fa701"
+
+[[packages.versions]]
+requirement = "=8.20.0-r.3"
+version = "8.20.0-r.3"
+digest = "sha256:6917a54d3b2b1dee5a02089309efeaf3e442c69b94d9647f1739fe839b15a965"
+
+[[packages]]
+name = "eryx:find"
+
+[[packages.versions]]
+requirement = "=0.11.0-r.2"
+version = "0.11.0-r.2"
+digest = "sha256:556917df2d064fddcea9579fbd332907d6977dd495e32ededaeeb823b7e25b00"
 
 [[packages]]
 name = "eryx:gh"
@@ -59,6 +90,11 @@ requirement = "=2.87.3-r.3"
 version = "2.87.3-r.3"
 digest = "sha256:609bd7da3b2c20123b31158fa578aa50bc8d4c0da755f9b160f214611f71c3f0"
 
+[[packages.versions]]
+requirement = "=2.87.3-r.5"
+version = "2.87.3-r.5"
+digest = "sha256:72a4254b0957d09ba75bbe77b8c802188019ddc333220eae7033b2f097cc1a36"
+
 [[packages]]
 name = "eryx:jaq"
 
@@ -70,6 +106,11 @@ digest = "sha256:dccff78f88c650578aca2d9c77bf2773d29bbf41aec225cdcb6afcccb90fc77
 [[packages.versions]]
 requirement = "=3.1.2-r.2"
 version = "3.1.2-r.2"
+digest = "sha256:dccff78f88c650578aca2d9c77bf2773d29bbf41aec225cdcb6afcccb90fc77d"
+
+[[packages.versions]]
+requirement = "=3.1.2-r.3"
+version = "3.1.2-r.3"
 digest = "sha256:dccff78f88c650578aca2d9c77bf2773d29bbf41aec225cdcb6afcccb90fc77d"
 
 [[packages]]
@@ -85,6 +126,11 @@ requirement = "=1.8.2-r.2"
 version = "1.8.2-r.2"
 digest = "sha256:642c761f04a76e1757bb28ae2f43031d149fe0ff168fdec756568b545d93c2f7"
 
+[[packages.versions]]
+requirement = "=1.8.2-r.3"
+version = "1.8.2-r.3"
+digest = "sha256:d817c97c0b1ce6c8fe409470701e579e9f142752ddc67df505d63a720d84dfe2"
+
 [[packages]]
 name = "eryx:rg"
 
@@ -96,6 +142,11 @@ digest = "sha256:b351c0e13ce56c40d95cc1786296129d680223c2c1c0b7646b867e1a11cde3e
 [[packages.versions]]
 requirement = "=15.1.0-r.2"
 version = "15.1.0-r.2"
+digest = "sha256:b351c0e13ce56c40d95cc1786296129d680223c2c1c0b7646b867e1a11cde3ec"
+
+[[packages.versions]]
+requirement = "=15.1.0-r.3"
+version = "15.1.0-r.3"
 digest = "sha256:b351c0e13ce56c40d95cc1786296129d680223c2c1c0b7646b867e1a11cde3ec"
 
 [[packages]]
@@ -111,6 +162,19 @@ requirement = "=1.1.0-r.2"
 version = "1.1.0-r.2"
 digest = "sha256:28c62532f5c70f8d977c9cb676cf956c361afa53b334f750a3f03cf44133651c"
 
+[[packages.versions]]
+requirement = "=1.1.0-r.3"
+version = "1.1.0-r.3"
+digest = "sha256:28c62532f5c70f8d977c9cb676cf956c361afa53b334f750a3f03cf44133651c"
+
+[[packages]]
+name = "eryx:sed"
+
+[[packages.versions]]
+requirement = "=0.3.0-r.2"
+version = "0.3.0-r.2"
+digest = "sha256:8c135d70aaceb591550d1b8beb955f3575e5e978d9e3a7f5c62cf8217e181bbe"
+
 [[packages]]
 name = "eryx:sqlite3"
 
@@ -123,3 +187,8 @@ digest = "sha256:9fc4760f3f31a30a4f3559c812094ca3598a9a55d21ba75cbf83d9a71e1e45d
 requirement = "=3.53.2-r.2"
 version = "3.53.2-r.2"
 digest = "sha256:9fc4760f3f31a30a4f3559c812094ca3598a9a55d21ba75cbf83d9a71e1e45d4"
+
+[[packages.versions]]
+requirement = "=3.53.2-r.3"
+version = "3.53.2-r.3"
+digest = "sha256:9db948d06c767bc89002e00e24391d4fc5175249f56a9e16d0adbb6e35aa99ff"
