@@ -80,6 +80,9 @@ LANE_PINS = {
           ("tools", "github:bytecodealliance/wit-bindgen")],
     "go": [("vars", "eryx_rev"), ("tools", "cargo:wasm-tools")],
 }
+# The wasmtime that compiles a manifest's `[cwasm]` (eryx-build's
+# compile_cwasm runs mise's): a pin of every command with one.
+CWASM_PINS = [("tools", "aqua:bytecodealliance/wasmtime")]
 # Files outside the recipe a lane's output depends on; see build_inputs.
 LANE_FILES = {"go": ["scripts/bootstrap-go-wasip3.sh"]}
 # What the notices and SBOM (scripts/notices.py) are made from, besides the
@@ -94,6 +97,12 @@ NOTICE_PINS = {
 }
 # A file a patch script reads from its own directory, named in the script.
 SIBLING = re.compile(r"[A-Za-z0-9_.-]+\.(?:patch|diff|sh|c|h|py)\b")
+# A path a patch script spells relative to its own directory, `$dir/<path>`
+# or `$(dirname "${BASH_SOURCE[0]}")/<path>` (`$dir/../shims/x.h`): it must
+# exist. One with a variable in it (`$dir/$1`) is left to SIBLING.
+SCRIPT_RELATIVE = re.compile(
+    r'(?:\$\{?dir\}?|\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\))/([A-Za-z0-9_./-]+)'
+)
 
 
 class Error(Exception):
@@ -171,8 +180,13 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
     - every repo path the manifest names, bare or as `{repo}/<path>` inside a
       flag (patches, shims, a WIT world), outside scratch/;
     - the files a named script reads from beside it (patch-git.sh applies
-      git-wasi.patch), found by name in the script;
+      git-wasi.patch), found by name in the script, and every path it spells
+      relative to its own directory (SCRIPT_RELATIVE), which must exist;
     - its lane's files outside clis/ (LANE_FILES).
+
+    The pins are its lane's (LANE_PINS), and the wasmtime that compiles its
+    cwasm if it has one (CWASM_PINS). A commands.toml entry adds its own
+    (entry_pins).
     """
     paths = {manifest_rel}
     recipe_dir = Path(manifest_rel).parent
@@ -190,12 +204,34 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
                 continue
             paths.add(candidate)
             if path.is_file() and path.suffix == ".sh":
-                for name in SIBLING.findall(path.read_text()):
+                text = path.read_text()
+                for name in SIBLING.findall(text):
                     if (path.parent / name).is_file():
                         paths.add((Path(candidate).parent / name).as_posix())
+                for rel in SCRIPT_RELATIVE.findall(text):
+                    found = os.path.normpath(Path(candidate).parent / rel.rstrip("/."))
+                    if found.startswith(("..", "/")) or not (root / found).exists():
+                        raise Error(f"{candidate} reads $dir/{rel}, which isn't a path in the repo")
+                    paths.add(Path(found).as_posix())
     lang = manifest["lang"]
     paths.update(LANE_FILES.get(lang, []))
-    return sorted(paths), LANE_PINS[lang]
+    pins = LANE_PINS[lang]
+    if manifest.get("cwasm", {}).get("enabled"):
+        pins = pins + CWASM_PINS
+    return sorted(paths), pins
+
+
+def entry_pins(entry: dict) -> list:
+    """The pins a commands.toml entry adds to its recipe's build inputs: a
+    fetched recipe's (it isn't in git, so its pin stands for it), and
+    `pins`, as `table.key` (a toolchain its lane doesn't otherwise use)."""
+    pins = [("vars", entry["fetched"])] if "fetched" in entry else []
+    for pin in entry.get("pins", []):
+        table, _, key = pin.partition(".")
+        if not key:
+            raise Error(f"pin {pin!r} isn't `<mise.toml table>.<key>`")
+        pins.append((table, key.strip('"')))
+    return pins
 
 
 def pin_values(mise: dict, pins: list) -> list:
@@ -215,10 +251,10 @@ def cache_key(root: Path, name: str) -> str:
     manifest = tomllib.loads((root / rel).read_text())
     mise = tomllib.loads((root / "mise.toml").read_text())
     paths, pins = build_inputs(root, rel, manifest)
-    pins = pins + NOTICE_PINS[manifest["lang"]]
     # A fetched recipe is hashed from its fetched copy, but say its pin too.
-    if "fetched" in entry:
-        pins = pins + [("vars", entry["fetched"])]
+    # Every command's smoke test runs under wasmtime, and a cached cwasm
+    # only loads under the one that compiled it.
+    pins = pins + entry_pins(entry) + NOTICE_PINS[manifest["lang"]] + CWASM_PINS
     manual = tomllib.loads((root / "third_party" / "manual.toml").read_text())
     listed = [c for c in manual.get("component", []) if name in c.get("artifacts", [])]
     paths = set(paths) | set(NOTICE_FILES) | {f for c in listed for f in c.get("files", [])}
@@ -331,10 +367,12 @@ def check_versions(root: Path, base: str | None) -> list[str]:
         old_upstream, _ = parse_version(old["version"])
         if old_upstream != upstream and revision != 1:
             problems.append(f"{label}: a new upstream version starts at r.1, not r.{revision}")
-        paths, pins = build_inputs(root, rel, manifest)
-        # A fetched recipe isn't in git, so its pin stands for it.
-        if "fetched" in entry:
-            pins = pins + [("vars", entry["fetched"])]
+        try:
+            paths, pins = build_inputs(root, rel, manifest)
+            pins = pins + entry_pins(entry)
+        except Error as e:
+            problems.append(f"{label}: {e}")
+            continue
         touched = sorted(
             path for path in changed
             if any(path == i or path.startswith(i + "/") for i in paths)

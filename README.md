@@ -29,7 +29,7 @@ Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its n
 - **Bumping:** a PR that changes what a command is built from must bump its `r.<n>`, and a new upstream version starts at `r.1`. What it's built from is:
   - its manifest and everything in its own directory;
   - the patches, shims and WIT it names, and the files its patch scripts apply;
-  - its lane's pins: eryx-build, Rust, the WASI SDK, wit-bindgen or the Go fork.
+  - its lane's pins: eryx-build, Rust, the WASI SDK, wit-bindgen or the Go fork; wasmtime, if it ships a cwasm; and any `pins` its `commands.toml` entry lists.
 
   `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR. A version may never be lower than one `commands.lock` already has. Versions are `MAJOR.MINOR.PATCH-r.<n>`, as wkg needs semver.
 - **CI cache:** on pushes and PRs, CI restores a command's built component dir instead of rebuilding it when nothing it's made from changed: the inputs above, plus its `commands.toml` entry and its notices' inputs (`python3 scripts/publish.py cache-key NAME` prints the hash). It still smoke-tests it. The weekly run and manual runs, so every real publish, build everything from source.

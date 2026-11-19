@@ -24,6 +24,9 @@
 #   eryx-org/eryx at the commit in this mise.toml var (`mise run
 #   fetch-<name>`; `mise run bump-<name>` moves it). Moving the pin counts as a
 #   change to the command's build inputs.
+# - `pins` (optional): mise.toml pins its build uses that its lane doesn't,
+#   as `<table>.<key>` (`["vars.wasi_sdk_version"]` for a Rust command that
+#   compiles C). They count as build inputs, like the lane's.
 
 # The same build as eryx's embedded coreutils, from eryx's recipe
 # (eryx-commands#7).
