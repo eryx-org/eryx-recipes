@@ -44,6 +44,8 @@ version = "8.20.0-r.2"
 
 [eryx.find]
 version = "0.11.0-r.1"
+# Its onig crate compiles Oniguruma's C with the WASI SDK's clang.
+pins = ["vars.wasi_sdk_version"]
 
 [eryx.gh]
 version = "2.87.3-r.4"
