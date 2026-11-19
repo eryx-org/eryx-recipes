@@ -91,6 +91,11 @@ gh)
     # A placeholder token gets a real 401 from api.github.com: DNS, TCP and TLS
     # all work, and no secret is needed.
     expect "$(ghw --env GH_TOKEN=placeholder "$OUT/component.wasm" api /zen)" "HTTP 401"
+    # gh's own exit statuses come through, not just 1: with no token, a command
+    # that needs auth exits 4. The Go fork reports them with exit-with-code.
+    status=0
+    ghw "$OUT/component.wasm" issue list -R cli/cli > /dev/null || status=$?
+    [ "$status" = 4 ] || { echo "::error::$NAME: expected exit status 4 with no token, got $status"; exit 1; }
     ;;
 git)
     # git imports eryx:process/run and pipe, for the subcommands and remote
