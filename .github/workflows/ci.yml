@@ -2,12 +2,25 @@
 # smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
 # Which lanes run when:
-# - Rust (rg, sd, jaq, sed, find, and coreutils from eryx's recipe) and C
-#   (sqlite3, curl, jq, awk, git): when the build pins (mise.toml), this workflow, smoke.sh or one
-#   of the lane's manifests, patches, shims or WIT change.
-# - Go (gh): only when its manifest, patch or the Go-fork bootstrap change. It
-#   builds the wasip3 Go fork from source (cached), so it is the slow one.
+# - Rust (rg, sd, jaq, sed, find, and coreutils from eryx's recipe), C
+#   (sqlite3, curl, jq, awk, git) and Go (gh): when the build pins
+#   (mise.toml), this workflow, smoke.sh, what the notices are made from, or
+#   one of the lane's manifests, patches, shims or WIT change.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
+#
+# A lane running doesn't rebuild each of its commands. On pushes and PRs, each
+# command's built component dir (component, cwasm, manifest, provenance,
+# notices, SBOM) is cached under a hash of everything it's made from
+# (`scripts/publish.py cache-key`): its recipe and the patches, shims and WIT
+# it names, the pinned eryx-build and toolchains, its commands.toml entry, its
+# third_party/manual.toml entries and their files, and the notices generator.
+# On a hit the build is skipped, but the smoke test still runs, so a smoke.sh
+# change re-checks every command without rebuilding it. Bump the key's `v1`
+# for a change to this workflow's build steps that the hash doesn't see.
+#
+# The weekly run and manual runs (so every publish) never read the cache:
+# they build everything from source, so bit-rot still shows up, and what's
+# published, signed and attested is always that run's own build.
 #
 # Each component is uploaded as a workflow artifact with its manifest.toml and
 # provenance.json. Then every run publishes what it built (#5):
@@ -91,6 +104,9 @@ jobs:
               - 'mise.toml'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+              # The cache key, and each command's version (in its SBOM).
+              - 'scripts/publish.py'
+              - 'commands.toml'
               # What each command's notices are made from.
               - 'scripts/notices.py'
               - 'about.toml'
@@ -122,15 +138,11 @@ jobs:
               # git's eryx:process/run bindings are generated from it.
               - 'wit/**'
             go:
+              - *driver
               - 'clis/gh.toml'
               - 'clis/patches/patch-gh-vendor.sh'
+              - 'clis/patches/gh-*.patch'
               - 'scripts/bootstrap-go-wasip3.sh'
-              # eryx-build's Go lane is pinned there.
-              - 'mise.toml'
-              # What its notices are made from.
-              - 'scripts/notices.py'
-              - 'about.toml'
-              - 'third_party/**'
 
   check:
     name: Check manifests
@@ -185,14 +197,34 @@ jobs:
           # cargo-about for the notices.
           install_args: rust aqua:bytecodealliance/wasmtime cargo:cargo-about
           cache: false
-      - uses: ./.github/actions/eryx-build
-      - run: rustup target add wasm32-wasip2
-      # find's onig crate compiles Oniguruma's C with the WASI SDK's clang.
-      - if: matrix.cli == 'find'
-        run: mise run ensure-wasi-sdk
+      # Before the key, which hashes the fetched recipe.
       - if: matrix.cli == 'coreutils'
         run: mise run fetch-coreutils
-      - run: mise run build-cli -- "$CLI"
+      - name: Hash the build inputs
+        id: key
+        env:
+          CLI: ${{ matrix.cli }}
+        run: |
+          hash=$(python3 scripts/publish.py cache-key "$CLI")
+          echo "key=component-v1-$CLI-$hash" >> "$GITHUB_OUTPUT"
+      # Pushes and PRs only (see the top). An exact key, with no restore-keys:
+      # a component built from other inputs must never stand in for this one.
+      - name: Restore the built component
+        id: cache
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/${{ matrix.cli }}-component
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/eryx-build
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: rustup target add wasm32-wasip2
+      # find's onig crate compiles Oniguruma's C with the WASI SDK's clang.
+      - if: matrix.cli == 'find' && steps.cache.outputs.cache-hit != 'true'
+        run: mise run ensure-wasi-sdk
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: mise run build-cli -- "$CLI"
         env:
           CLI: ${{ matrix.cli }}
       - run: clis/smoke.sh "$CLI"
@@ -202,6 +234,7 @@ jobs:
       # its toolchain's libraries. A crate licence cargo-about won't accept
       # fails here.
       - name: Write the notices
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           # Not `if published`: a crash there must fail the step, not skip it.
           published=$(python3 scripts/notices.py published "$CLI")
@@ -210,6 +243,16 @@ jobs:
           fi
         env:
           CLI: ${{ matrix.cli }}
+      # Saved from PRs too: a PR's caches are scoped to it (only main's are
+      # seen by other branches), and only people with write access can run
+      # CI here (the repo is private, so there are no fork PRs). Only after
+      # the smoke test and notices pass.
+      - name: Save the built component
+        if: steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/${{ matrix.cli }}-component
+          key: ${{ steps.key.outputs.key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.cli }}-component
@@ -247,14 +290,35 @@ jobs:
           # wit-bindgen for git's bindings, wasm-tools for its smoke check.
           install_args: rust aqua:bytecodealliance/wasmtime github:bytecodealliance/wit-bindgen cargo:wasm-tools
           cache: false
-      - uses: ./.github/actions/eryx-build
+      - name: Hash the build inputs
+        id: key
+        env:
+          CLI: ${{ matrix.cli }}
+        run: |
+          hash=$(python3 scripts/publish.py cache-key "$CLI")
+          echo "key=component-v1-$CLI-$hash" >> "$GITHUB_OUTPUT"
+      # Pushes and PRs only (see the top). An exact key, with no restore-keys:
+      # a component built from other inputs must never stand in for this one.
+      - name: Restore the built component
+        id: cache
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/${{ matrix.cli }}-component
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/eryx-build
       # The CMake builds use Ninja, and awk's parser needs bison; the runner
       # ships neither.
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build bison
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build bison
       # Every C build links the rustc-built start-in-$PWD object (eryx-org/eryx#978).
-      - run: rustup target add wasm32-wasip2
-      - run: mise run ensure-wasi-sdk
-      - run: mise run build-cli -- "$MANIFEST"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: rustup target add wasm32-wasip2
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: mise run ensure-wasi-sdk
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: mise run build-cli -- "$MANIFEST"
         env:
           MANIFEST: ${{ matrix.manifest || matrix.cli }}
       - run: clis/smoke.sh "$CLI"
@@ -264,6 +328,7 @@ jobs:
       # its toolchain's libraries. A crate licence cargo-about won't accept
       # fails here.
       - name: Write the notices
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           # Not `if published`: a crash there must fail the step, not skip it.
           published=$(python3 scripts/notices.py published "$CLI")
@@ -274,8 +339,18 @@ jobs:
           CLI: ${{ matrix.cli }}
       # A GPL component ships with its licence and our notice (eryx-org/eryx#837).
       - name: Add git's licence and notice
-        if: matrix.cli == 'git'
+        if: matrix.cli == 'git' && steps.cache.outputs.cache-hit != 'true'
         run: cp scratch/git/COPYING clis/gpl/git/NOTICE.md scratch/git-component/
+      # Saved from PRs too: a PR's caches are scoped to it (only main's are
+      # seen by other branches), and only people with write access can run
+      # CI here (the repo is private, so there are no fork PRs). Only after
+      # the smoke test and notices pass.
+      - name: Save the built component
+        if: steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/${{ matrix.cli }}-component
+          key: ${{ steps.key.outputs.key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.cli }}-component
@@ -306,21 +381,41 @@ jobs:
           version: 2026.11.8
           install_args: rust cargo:wasm-tools aqua:bytecodealliance/wasmtime
           cache: false
-      - uses: ./.github/actions/eryx-build
+      - name: Hash the build inputs
+        id: key
+        env:
+          CLI: gh
+        run: |
+          hash=$(python3 scripts/publish.py cache-key "$CLI")
+          echo "key=component-v1-$CLI-$hash" >> "$GITHUB_OUTPUT"
+      # Pushes and PRs only (see the top). An exact key, with no restore-keys:
+      # a component built from other inputs must never stand in for this one.
+      - name: Restore the built component
+        id: cache
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/gh-component
+          key: ${{ steps.key.outputs.key }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/eryx-build
       # Building the fork from source takes ~10 minutes; key it on the script,
       # which pins the fork's commit and the GOWASM it writes to go.env. Go's
       # build cache isn't kept, so a new toolchain always builds fresh.
       - name: Cache wasip3 Go toolchain
         id: go-wasip3-cache
+        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: scratch/go-wasip3
           key: go-wasip3-${{ hashFiles('scripts/bootstrap-go-wasip3.sh') }}
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.27'
           cache: false
       - name: Bootstrap wasip3 Go toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           GOROOT_BOOTSTRAP="$(go env GOROOT)"
           export GOROOT_BOOTSTRAP
@@ -329,18 +424,30 @@ jobs:
       # Pushes to main save; PRs and the weekly run only restore (a PR's
       # caches are scoped to it, and would only evict main's).
       - name: Save wasip3 Go toolchain
-        if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.go-wasip3-cache.outputs.cache-hit != 'true' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.go-wasip3-cache.outcome == 'success' && steps.go-wasip3-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: scratch/go-wasip3
           key: ${{ steps.go-wasip3-cache.outputs.cache-primary-key }}
-      - run: mise run build-cli -- gh
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: mise run build-cli -- gh
       - run: clis/smoke.sh gh
       # Its Go modules' licences, and the Go standard library's.
       - name: Write the notices
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mise run install-license-classifier
           mise run notices -- scratch/gh-component gh
+      # Saved from PRs too: a PR's caches are scoped to it (only main's are
+      # seen by other branches), and only people with write access can run
+      # CI here (the repo is private, so there are no fork PRs). Only after
+      # the smoke test and notices pass.
+      - name: Save the built component
+        if: steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/gh-component
+          key: ${{ steps.key.outputs.key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gh-component

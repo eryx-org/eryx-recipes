@@ -22,6 +22,12 @@
     publish.py lock --results RESULTS.json [--lock commands.lock]
         Add the results' versions to a lock file in wkg.lock's format.
 
+    publish.py cache-key NAME
+        Print a hash of everything a command's built component dir depends
+        on, for CI's component cache: its build inputs (build_inputs) and its
+        notices' (NOTICE_FILES, its third_party/manual.toml entries and their
+        files, its commands.toml entry). Any change to them is a new key.
+
     publish.py bump NAMESPACE:NAME [--branch BRANCH]
         For a recipe fetched from eryx (`fetched` in commands.toml): move its
         pin to the newest commit on BRANCH that changed the recipe or its
@@ -76,6 +82,16 @@ LANE_PINS = {
 }
 # Files outside the recipe a lane's output depends on; see build_inputs.
 LANE_FILES = {"go": ["scripts/bootstrap-go-wasip3.sh"]}
+# What the notices and SBOM (scripts/notices.py) are made from, besides the
+# command's manual.toml entries, its commands.toml entry and its build inputs:
+# the generator for every lane, and each lane's pinned notice tools.
+NOTICE_FILES = ["scripts/notices.py", "about.toml", "third_party/about.hbs",
+                "third_party/about-std.toml"]
+NOTICE_PINS = {
+    "rust": [("tools", "cargo:cargo-about")],
+    "c": [],
+    "go": [("vars", "license_classifier_version")],
+}
 # A file a patch script reads from its own directory, named in the script.
 SIBLING = re.compile(r"[A-Za-z0-9_.-]+\.(?:patch|diff|sh|c|h|py)\b")
 
@@ -184,6 +200,44 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
 
 def pin_values(mise: dict, pins: list) -> list:
     return [mise.get(table, {}).get(key) for table, key in pins]
+
+
+def cache_key(root: Path, name: str) -> str:
+    """A hash of everything `name`'s built component dir (component, cwasm,
+    manifest, provenance, notices, SBOM) depends on; see `cache-key`."""
+    commands = load_commands((root / COMMANDS).read_text())
+    keys = [key for key in recipes(root) if key[1] == name]
+    if len(keys) != 1:
+        raise Error(f"{name}: {len(keys)} recipes in clis/ have that name")
+    key = keys[0]
+    entry = commands.get(key, {})
+    rel = manifest_path(key, entry)
+    manifest = tomllib.loads((root / rel).read_text())
+    mise = tomllib.loads((root / "mise.toml").read_text())
+    paths, pins = build_inputs(root, rel, manifest)
+    pins = pins + NOTICE_PINS[manifest["lang"]]
+    # A fetched recipe is hashed from its fetched copy, but say its pin too.
+    if "fetched" in entry:
+        pins = pins + [("vars", entry["fetched"])]
+    manual = tomllib.loads((root / "third_party" / "manual.toml").read_text())
+    listed = [c for c in manual.get("component", []) if name in c.get("artifacts", [])]
+    paths = set(paths) | set(NOTICE_FILES) | {f for c in listed for f in c.get("files", [])}
+    files = {}
+    for path in sorted(paths):
+        full = root / path
+        found = sorted(full.rglob("*")) if full.is_dir() else [full]
+        for f in found:
+            if f.is_file():
+                files[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+            elif not f.exists():
+                raise Error(f"{name}: build input {path} doesn't exist")
+    inputs = {
+        "command": [key[0], key[1], entry],
+        "files": files,
+        "pins": [[table, k, v] for (table, k), v in zip(pins, pin_values(mise, pins))],
+        "manual": listed,
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
 def multicall_names(manifest: dict) -> list[str]:
@@ -669,6 +723,8 @@ def main() -> int:
     locking = sub.add_parser("lock")
     locking.add_argument("--results", type=Path, required=True)
     locking.add_argument("--lock", type=Path, default=ROOT / LOCK)
+    keying = sub.add_parser("cache-key")
+    keying.add_argument("name")
     bumping = sub.add_parser("bump")
     bumping.add_argument("name")
     bumping.add_argument("--branch", default="multi-guest")
@@ -688,6 +744,9 @@ def main() -> int:
             )
             if not args.out:
                 sys.stdout.write(json.dumps(results, indent=2) + "\n")
+            return 0
+        if args.command == "cache-key":
+            print(cache_key(ROOT, args.name))
             return 0
         if args.command == "bump":
             bump(ROOT, args.name, args.branch)

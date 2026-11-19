@@ -192,8 +192,8 @@ class Lock(unittest.TestCase):
                 publish.lock([{"name": "eryx:sd", "version": "1.1.0-r.2", "layer_digest": "sha256:x"}], path)
 
 
-class CheckVersions(unittest.TestCase):
-    """check_versions on a scratch git repo: a base commit, then changes."""
+class ScratchRepo(unittest.TestCase):
+    """A scratch git repo with two recipes: a base commit, then changes."""
 
     MISE = 'vars = { eryx_rev = "%s", wasi_sdk_version = "wasi-sdk-33" }\n[tools]\nrust = "1.100.0"\n'
 
@@ -252,6 +252,10 @@ class CheckVersions(unittest.TestCase):
         text = (self.root / "commands.toml").read_text()
         old = publish.load_commands(text)[("eryx", name)]["version"]
         self.write("commands.toml", text.replace(f'"{old}"', f'"{version}"'))
+
+
+class CheckVersions(ScratchRepo):
+    """check_versions on the scratch repo."""
 
     def test_unchanged_is_fine(self):
         self.assertEqual(self.problems(), [])
@@ -380,6 +384,72 @@ class CheckVersions(unittest.TestCase):
         self.assertEqual(len(problems), 2, problems)
         self.assertTrue(any("eryx-gpl:git" in p and "no entry" in p for p in problems))
         self.assertTrue(any("8.20.0" in p for p in problems))
+
+
+class CacheKey(ScratchRepo):
+    """cache_key on the same scratch repo, with notices inputs."""
+
+    def setUp(self):
+        super().setUp()
+        for rel in publish.NOTICE_FILES:
+            self.write(rel, "x\n")
+        self.write("third_party/licenses/sd", "MIT\n")
+        self.write("third_party/manual.toml", """
+            [[component]]
+            name = "sd"
+            files = ["third_party/licenses/sd"]
+            artifacts = ["sd"]
+            [[component]]
+            name = "curl"
+            files = []
+            artifacts = ["curl"]
+        """)
+        self.sd, self.curl = self.keys()
+
+    def keys(self):
+        return publish.cache_key(self.root, "sd"), publish.cache_key(self.root, "curl")
+
+    def test_same_inputs_same_key(self):
+        self.assertEqual(self.keys(), (self.sd, self.curl))
+        self.assertNotEqual(self.sd, self.curl)
+
+    def test_a_patch_change_is_a_new_key_for_its_command_only(self):
+        self.write("clis/patches/patch-sd.sh", "echo 2\n")
+        sd, curl = self.keys()
+        self.assertNotEqual(sd, self.sd)
+        self.assertEqual(curl, self.curl)
+
+    def test_another_commands_notices_dont_change_the_key(self):
+        text = (self.root / "third_party/manual.toml").read_text()
+        self.write("third_party/manual.toml", text.replace('name = "curl"', 'name = "libcurl"'))
+        self.write("third_party/licenses/other", "x\n")
+        sd, curl = self.keys()
+        self.assertEqual(sd, self.sd)
+        self.assertNotEqual(curl, self.curl)
+
+    def test_its_licence_file_changes_the_key(self):
+        self.write("third_party/licenses/sd", "Apache-2.0\n")
+        self.assertNotEqual(self.keys()[0], self.sd)
+
+    def test_its_version_changes_the_key(self):
+        # It's in the SBOM.
+        self.set_version("sd", "1.1.0-r.2")
+        self.assertEqual(self.keys(), (self.keys()[0], self.curl))
+        self.assertNotEqual(self.keys()[0], self.sd)
+
+    def test_a_toolchain_pin_changes_every_key(self):
+        self.write("mise.toml", self.MISE % "bbb")
+        sd, curl = self.keys()
+        self.assertNotEqual(sd, self.sd)
+        self.assertNotEqual(curl, self.curl)
+
+    def test_a_missing_input_fails(self):
+        (self.root / "clis/patches/patch-sd.sh").unlink()
+        # build_inputs skips a named path that doesn't exist, so the
+        # manifest's text still covers it; a notices file must exist.
+        (self.root / "about.toml").unlink()
+        with self.assertRaises(publish.Error):
+            publish.cache_key(self.root, "sd")
 
 
 if __name__ == "__main__":
