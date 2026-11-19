@@ -94,11 +94,23 @@ awk)
     # Pipes and system() need a shell: they fail, saying why.
     expect "$(awkw 'BEGIN{r = system("true"); print "r=" r}' 2>&1)" "r=-1"
     expect "$(awkw 'BEGIN{r = system("true")}' 2>&1)" "system() isn't supported in this sandbox"
-    expect "$(awkw 'BEGIN{"echo hi" | getline x; print "got:" x}' 2>&1)" "got:"
+    # `cmd | getline` stops awk: failing softly would return -1 (true), so
+    # `while (cmd | getline x)` would never end.
+    if out="$(awkw 'BEGIN{"echo hi" | getline x; print "got:" x}' 2>&1)"; then
+        echo "::error::awk: cmd | getline succeeded"; exit 1
+    fi
+    expect "$out" "a pipe from a command isn't supported in this sandbox"
+    status=0
+    out="$(timeout 5 wasmtime run "$OUT/component.wasm" 'BEGIN{while ("ls" | getline f) n++}' 2>&1)" || status=$?
+    if [ "$status" -eq 0 ] || [ "$status" -eq 124 ] || [ "$(wc -l <<< "$out")" -gt 5 ]; then
+        printf '%s\n' "$out" | head -5
+        echo "::error::awk: while (cmd | getline) succeeded, timed out or flooded stderr (exit $status)"; exit 1
+    fi
+    expect "$out" "isn't supported in this sandbox"
     if out="$(awkw 'BEGIN{print "a" | "sort"}' 2>&1)"; then
         echo "::error::awk: print | cmd succeeded"; exit 1
     fi
-    expect "$out" "a pipe to or from a command isn't supported in this sandbox"
+    expect "$out" "a pipe to a command isn't supported in this sandbox"
     ;;
 find)
     findw() { wasmtime run --dir "$WORK/data::/data" "$OUT/component.wasm" "$@" 2>&1; }
