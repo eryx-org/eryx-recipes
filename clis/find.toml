@@ -3,14 +3,21 @@
 #
 # uutils findutils' `find` (only that binary: not xargs, which eryx's shell
 # provides as a builtin, nor locate/updatedb). It builds for wasip2 as it is,
-# with oniguruma (for -regex) compiled in by the onig crate. The patch makes
-# -exec, -execdir, -ok and -okdir fail up front, pointing at
-# `find ... -print0 | xargs -0`: a WASI command can't start another one, and
-# upstream would report that per file and still exit 0. -perm, -user and
-# -group fail too (WASI has no modes or owners), and -ls shows no modes.
+# with oniguruma (for -regex) compiled in by the onig crate.
+#
+# A WASI command can't start another one, so the patch runs -exec's and
+# -execdir's commands through eryx:process/run, as git does, with bindings
+# wit-bindgen generates from wit/process.wit (patch-find.sh copies it in).
+# The host runs them only if it lets find spawn (`Command::allow_spawn`);
+# otherwise each fails with spawn-failed. A command the host doesn't have
+# (the shell's builtins: echo, true, its grep) runs through `sh -c` instead.
+# Their output is captured and shows once each has exited, and they get no
+# stdin. -ok and -okdir fail up front, since they'd prompt on stdin. -perm,
+# -user and -group fail too (WASI has no modes or owners), and -ls shows no
+# modes.
 
 name = "find"
-description = "find — uutils findutils' find, without -exec (Rust, wasip2)"
+description = "find — uutils findutils' find, -exec through eryx:process/run (Rust, wasip2)"
 # SPDX expression for the upstream source, recorded in provenance.json.
 # findutils is MIT; the onig crate builds Oniguruma (BSD-2-Clause) into it,
 # which its notices list with the other crates.
