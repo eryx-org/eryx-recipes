@@ -27,6 +27,11 @@ gets our build, with resolution pinned to the version we built
   - `test_requires`: pure-Python packages it needs to import or test,
     pinned (e.g. `["typing-extensions==4.16.0"]`), installed beside it for
     `verify` only (environments get them from PyPI, as its dependencies).
+  - `native_requires`: other recipes it compiles against or needs to import
+    (e.g. pandas' `["numpy"]`). `build` builds them first, into
+    `OUT/deps/`, and unpacks them into `$NATIVE_DEPS` for its `build.sh`;
+    `verify` installs them beside it. Environments get our builds of them
+    anyway, as they're recipes too.
   - `[env]`: extra environment variables for the build.
 - `test.py`: Python run in eryx with the wheel installed. Use `assert`s
   that only pass with the native code (not a pure-Python fallback).
@@ -50,6 +55,7 @@ in a Python 3.14 venv, cross-compiling for `wasm32-wasip2`:
   make `sysconfig` describe WASI, so extensions get WASI suffixes and the
   wheel is tagged `cp314-cp314-wasi_wasm32`.
 - `$SYSROOT` is the sysroot (`include/`, `lib/`, `sysconfig/`).
+- `$NATIVE_DEPS` has the recipe's `native_requires`, unpacked.
 
 The sysroot comes from `native/sysroot.sh`: CPython's headers and
 sysconfig, configured as componentize-py builds eryx's libpython. The

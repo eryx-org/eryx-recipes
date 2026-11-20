@@ -1,0 +1,104 @@
+--- a/pandas/core/interchange/from_dataframe.py
++++ b/pandas/core/interchange/from_dataframe.py
+@@ -1,6 +1,9 @@
+ from __future__ import annotations
+ 
+-import ctypes
++try:
++    import ctypes
++except ImportError:  # no _ctypes on WASI
++    ctypes = None
+ import re
+ from typing import (
+     Any,
+--- a/pandas/errors/__init__.py
++++ b/pandas/errors/__init__.py
+@@ -5,7 +5,10 @@
+ from __future__ import annotations
+ 
+ import abc
+-import ctypes
++try:
++    import ctypes
++except ImportError:  # no _ctypes on WASI
++    ctypes = None
+ 
+ from pandas._config.config import OptionError
+ 
+--- a/pandas/io/common.py
++++ b/pandas/io/common.py
+@@ -26,7 +26,10 @@
+     TextIOWrapper,
+     UnsupportedOperation,
+ )
+-import mmap
++try:
++    import mmap
++except ImportError:  # no mmap module on WASI
++    mmap = None
+ import os
+ from pathlib import Path
+ import re
+@@ -486,7 +489,7 @@
+             "storage_options passed with file object or non-fsspec file path"
+         )
+ 
+-    if isinstance(filepath_or_buffer, (str, bytes, mmap.mmap)):
++    if isinstance(filepath_or_buffer, (str, bytes) if mmap is None else (str, bytes, mmap.mmap)):
+         return IOArgs(
+             filepath_or_buffer=_expand_user(filepath_or_buffer),
+             encoding=encoding,
+@@ -1216,6 +1219,8 @@
+     """Try to memory map file/buffer."""
+     handles: list[BaseBuffer] = []
+     memory_map &= hasattr(handle, "fileno") or isinstance(handle, str)
++    # memory_map is a speed hint: without mmap (WASI), read the file normally
++    memory_map &= mmap is not None
+     if not memory_map:
+         return handle, memory_map, handles
+ 
+--- a/pandas/io/excel/_openpyxl.py
++++ b/pandas/io/excel/_openpyxl.py
+@@ -1,6 +1,9 @@
+ from __future__ import annotations
+ 
+-import mmap
++try:
++    import mmap
++except ImportError:  # no mmap module on WASI
++    mmap = None
+ from typing import (
+     TYPE_CHECKING,
+     Any,
+@@ -107,7 +110,7 @@
+         Save workbook to disk.
+         """
+         self.book.save(self._handles.handle)
+-        if "r+" in self._mode and not isinstance(self._handles.handle, mmap.mmap):
++        if "r+" in self._mode and (mmap is None or not isinstance(self._handles.handle, mmap.mmap)):
+             # truncate file to the written content
+             self._handles.handle.truncate()
+ 
+--- a/pandas/io/parsers/readers.py
++++ b/pandas/io/parsers/readers.py
+@@ -15,7 +15,10 @@
+ import contextlib
+ import csv
+ import io
+-import mmap
++try:
++    import mmap
++except ImportError:  # no mmap module on WASI
++    mmap = None
+ import os
+ import queue
+ import sys
+@@ -440,7 +443,7 @@
+     containerised pandas does not oversubscribe its allocation.
+     """
+     max_threads = get_option("mode.max_threads")
+-    if sys.platform == "emscripten":
++    if sys.platform in ("emscripten", "wasi"):
+         # WASM cannot spawn threads, regardless of mode.max_threads.
+         return 1
+     if max_threads is not None:
