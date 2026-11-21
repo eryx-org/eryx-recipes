@@ -10,9 +10,10 @@ directory and builds a wheel for eryx's WASI with the wasi-sdk at
 $WASI_SDK_PATH and a sysroot from native/sysroot.sh: `pip wheel`, unless the
 recipe has a build.sh. `verify` imports the recipe's modules in eryx and runs
 its test.py there, with eryx-precompile, alongside its `test_requires`
-(pure-Python packages from PyPI). `publish` uploads wheels to the
-native wheels bucket and lists them in its index.json (with the aws CLI and
-its usual AWS_* credentials), which the builder reads (src/builder/native.rs).
+(pure-Python packages from PyPI) and its `native_requires` (other recipes,
+built first). `publish` uploads wheels to the native wheels bucket and lists
+them in its index.json (with the aws CLI and its usual AWS_* credentials),
+which the builder reads (src/builder/native.rs).
 
 `--sandbox` runs a build or verify in a throwaway Docker container that has
 only the recipes, the toolchain and the output mounted, and none of this
@@ -99,6 +100,16 @@ def build(args):
     python = venv / "bin/python"
     run("uv", "pip", "install", "--quiet", "--python", python, "pip", *spec.get("requires", []))
 
+    # Other recipes this one compiles against (e.g. numpy's headers), built
+    # first into OUT/deps (for verify, which installs them beside it) and
+    # unpacked into NATIVE_DEPS for its build.sh to use
+    native_deps = work / "native-deps"
+    native_deps.mkdir()
+    for dep in spec.get("native_requires", []):
+        dep_wheel = build(argparse.Namespace(recipe=REPO / "native" / dep, sysroot=sysroot, out=out / "deps"))
+        with zipfile.ZipFile(dep_wheel) as zf:
+            zf.extractall(native_deps)
+
     target = "--target=wasm32-wasip2"
     flags = f"-fPIC -I{sysroot}/include/python3.14"
     env = {
@@ -119,6 +130,7 @@ def build(args):
         "PATH": f"{venv}/bin:{os.environ['PATH']}",
         "SYSROOT": str(sysroot),
         "WHEEL_DIR": str(work / "dist"),
+        "NATIVE_DEPS": str(native_deps),
         **spec.get("env", {}),
     }
     if (recipe / "build.sh").exists():
@@ -135,6 +147,7 @@ def build(args):
     built = out / wheel.name
     built.write_bytes(wheel.read_bytes())
     print(f"Built {built} ({', '.join(natives)})")
+    return built
 
 
 def verify(args):
@@ -153,6 +166,10 @@ def verify(args):
                 "--python-version", "3.14", "--python-platform", "x86_64-unknown-linux-gnu",
                 "--target", site_packages, *spec["test_requires"])
             command += ["--site-packages", site_packages]
+        # Wheels of its native_requires, which build left beside it
+        for dep in spec.get("native_requires", []):
+            (dep_wheel,) = (wheel.parent / "deps").glob(f"{normalize(dep).replace('-', '_')}-*.whl")
+            command += ["--package", dep_wheel]
         for module in spec.get("imports", []):
             command += ["--import", module]
         test = recipe / "test.py"
@@ -230,6 +247,8 @@ def sandboxed(args):
     else:
         wheel, precompile = Path(args.wheel).resolve(), Path(args.precompile).resolve()
         mounts += [(wheel, "ro"), (precompile, "ro")]
+        if (wheel.parent / "deps").is_dir():
+            mounts.append((wheel.parent / "deps", "ro"))
         inner = ["verify", wheel, recipe, "--precompile", precompile]
 
     command = ["docker", "run", "--rm", "--init", "--workdir", "/tmp",
