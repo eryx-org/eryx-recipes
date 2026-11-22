@@ -52,8 +52,11 @@ in a Python 3.14 venv, cross-compiling for `wasm32-wasip2`:
 - `CFLAGS`/`CXXFLAGS` add `-fPIC` and the CPython headers; `LDFLAGS` links
   against eryx's own `libpython3.14.so`, which resolves the C API.
 - `_PYTHON_SYSCONFIGDATA_NAME`, `_PYTHON_HOST_PLATFORM` and `PYTHONPATH`
-  make `sysconfig` describe WASI, so extensions get WASI suffixes and the
-  wheel is tagged `cp314-cp314-wasi_wasm32`.
+  make `sysconfig` describe WASI, so extensions get WASI suffixes.
+- Whatever platform tag the build backend gives the wheel, `build` retags
+  it `wasi_0_0_0_wasm32` (`wheel tags`): what CPython's
+  `sysconfig.get_platform()` reports on WASI, and what maturin and
+  wasi-wheels use. There's no PEP for WASI tags yet.
 - `$SYSROOT` is the sysroot (`include/`, `lib/`, `sysconfig/`).
 - `$NATIVE_DEPS` has the recipe's `native_requires`, unpacked.
 
@@ -94,9 +97,57 @@ environment waiting for it.
 ## Publishing
 
 On `main`, `native/build.py publish` uploads each wheel to
-`wheels/{sha256}/{file}` in the `eryx-native-wheels` bucket and lists it in
-`index.json` with the ABI it's for (`native::ABI`). A rebuild of the same
-version replaces it; older versions stay listed, so environments locked to
-them still rebuild, and new resolves are pinned to the newest. Every deployment reads the same bucket, so a merged recipe
-is installable everywhere once it's published, without a deploy.
-Environments created before then that needed it have to be created again.
+`wheels/{sha256}/{file}` in the `eryx-wheels` R2 bucket, public at
+`https://wheels.eryx.run` (Cloudflare caches it: a zone cache rule, and a
+URL rewrite serving a path ending in `/` from its `index.html`, which R2
+doesn't do itself). It lists each wheel in `index.json` with the ABI it's
+for (`native::ABI`), which builders read, and writes a PEP 503 simple
+index per ABI from it for pip (`<abi>/simple/<package>/`). Wheels are
+cached for good (their keys have their hash) and the index pages for 5
+minutes; `index.json` isn't cached, so builders see a publish at once.
+
+A rebuild of the same version replaces it; older versions stay listed, so
+environments locked to them still rebuild, and new resolves are pinned to
+the newest. Every deployment reads the same bucket, so a merged recipe is
+installable everywhere once it's published, without a deploy. Environments
+created before then that needed it have to be created again.
+
+The publish job uses an R2 token that can only write that bucket
+(`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` in the `native-wheels`
+environment).
+
+### The ABI
+
+A wheel's tag can't say what it really needs, so the ABI is in the index's
+path instead. `native::ABI` is `cp314-wasip2-sdk<N>`:
+
+- `cp314`: CPython 3.14.
+- `wasip2`: eryx's WASI. Its libpython is componentize-py's shared
+  `libpython3.14.so`, and the wheels' `.so` files are dynamic libraries
+  linked against it, so they only load in runtimes that link modules the
+  same way (eryx, componentize-py), not in CPython's own statically linked
+  WASI build, which has no `dlopen`.
+- `sdk<N>`: the wasi-sdk eryx's guest libraries and these wheels are built
+  with (`wasi_sdk_version` in eryx's mise.toml, read by `build.rs`).
+  wasi-libc has no compatibility guarantees between versions, so moving it
+  is a new ABI, and CI rebuilds and republishes every recipe for it.
+
+Change the prefix in `native.rs` if eryx's guest libraries change
+incompatibly some other way.
+
+## Using the wheels elsewhere
+
+Anything that runs eryx's runtime can install them with pip, for the WASI
+platform, into a directory to use as site-packages. The index is the ABI's,
+`native::ABI` (`cp314-wasip2-sdk33` as of eryx's wasi-sdk 33):
+
+```sh
+pip install --target site-packages --only-binary :all: \
+    --python-version 3.14 --implementation cp --abi cp314 \
+    --platform wasi_0_0_0_wasm32 --platform any \
+    --extra-index-url https://wheels.eryx.run/cp314-wasip2-sdk33/simple/ \
+    numpy
+```
+
+Pure-Python packages still come from PyPI. Then give eryx the directory
+(`SandboxBuilder::with_site_packages`, or `eryx-precompile --site-packages`).

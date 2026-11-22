@@ -1,8 +1,9 @@
 name: Native wheels
 
 # Builds every recipe in native/ for eryx's WASI and tests it in eryx. On
-# main, the wheels are published to the native wheels bucket, where builders
-# install them (src/builder/native.rs). Only main's runs get the bucket's
+# main, the wheels are published to the native wheels bucket (R2, public at
+# https://wheels.eryx.run), where builders install them
+# (src/builder/native.rs) and pip can (its simple index). Only main's runs get the bucket's
 # write key (the native-wheels environment), so a PR's recipe, which runs
 # its own build code, never sees it. Rebuilt when eryx moves, as its
 # libpython and libc are what wheels link to.
@@ -90,7 +91,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: native-wheels
     steps:
+      # The eryx submodule too: the ABI has its wasi-sdk version
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -100,7 +104,8 @@ jobs:
 
       - name: Publish
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # An R2 token for the eryx-wheels bucket only
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: python3 native/build.py publish dist/*.whl
