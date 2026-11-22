@@ -11,9 +11,10 @@ $WASI_SDK_PATH and a sysroot from native/sysroot.sh: `pip wheel`, unless the
 recipe has a build.sh. `verify` imports the recipe's modules in eryx and runs
 its test.py there, with eryx-precompile, alongside its `test_requires`
 (pure-Python packages from PyPI) and its `native_requires` (other recipes,
-built first). `publish` uploads wheels to the native wheels bucket and lists
-them in its index.json (with the aws CLI and its usual AWS_* credentials),
-which the builder reads (src/builder/native.rs).
+built first). `publish` uploads wheels to the native wheels bucket (R2,
+public at https://wheels.eryx.run) and lists them in its index.json, which
+the builder reads (src/builder/native.rs), and in a PEP 503 simple index per
+ABI for pip (with the aws CLI and its usual AWS_* credentials).
 
 `--sandbox` runs a build or verify in a throwaway Docker container that has
 only the recipes, the toolchain and the output mounted, and none of this
@@ -26,6 +27,7 @@ that uv provides.
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -42,6 +44,17 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
+# The platform tag wheels get, whatever their build backend chose: what
+# CPython's sysconfig.get_platform() reports on WASI, as maturin and
+# wasi-wheels use (there's no PEP for WASI tags yet). It doesn't say which
+# wasi-sdk or libpython a wheel needs, so the index is per ABI (`abi()`).
+PLATFORM = "wasi_0_0_0_wasm32"
+
+# Where `publish` puts wheels, served at https://wheels.eryx.run through
+# Cloudflare's cache (R2's public custom domain)
+BUCKET = "eryx-wheels"
+ENDPOINT = "https://944ab6808cfb80c606e4873f8e6c2344.r2.cloudflarestorage.com"
+
 # What a sandboxed build runs in; recipes that need more (e.g. rustup)
 # install it in their build.sh
 SANDBOX_IMAGE = "ubuntu:24.04"
@@ -49,9 +62,13 @@ SANDBOX_PACKAGES = "python3 patch ca-certificates curl build-essential"
 
 
 def abi():
-    """The ABI the builder installs builds for (`native::ABI`)"""
+    """The ABI the builder installs builds for (`native::ABI`): its prefix
+    and the wasi-sdk version from eryx's mise.toml, as build.rs reads it"""
     source = (REPO / "src/builder/native.rs").read_text()
-    return re.search(r'pub const ABI: &str = "([^"]+)";', source).group(1)
+    prefix = re.search(r'pub const ABI: &str = concat!\("([^"]+)"', source).group(1)
+    mise = (REPO / "eryx/mise.toml").read_text()
+    sdk = re.search(r'^wasi_sdk_version = "wasi-sdk-(\d+)"$', mise, re.M).group(1)
+    return prefix + sdk
 
 
 def normalize(name):
@@ -98,7 +115,7 @@ def build(args):
     venv = work / "venv"
     run("uv", "venv", "--quiet", "--python", "3.14", venv)
     python = venv / "bin/python"
-    run("uv", "pip", "install", "--quiet", "--python", python, "pip", *spec.get("requires", []))
+    run("uv", "pip", "install", "--quiet", "--python", python, "pip", "wheel", *spec.get("requires", []))
 
     # Other recipes this one compiles against (e.g. numpy's headers), built
     # first into OUT/deps (for verify, which installs them beside it) and
@@ -142,8 +159,15 @@ def build(args):
     (wheel,) = (work / "dist").glob("*.whl")
     with zipfile.ZipFile(wheel) as zf:
         natives = [name for name in zf.namelist() if name.endswith(".so")]
-    if not wheel.name.endswith("-wasi_wasm32.whl") or not natives:
+    if "wasi" not in wheel.name.rsplit("-", 1)[-1] or not natives:
         sys.exit(f"{wheel.name} isn't a WASI build with native code: {natives}")
+    # Backends tag WASI differently (`wasi_wasm32`, `wasi_0_0_0_wasm32`), so
+    # every wheel gets PLATFORM; `wheel tags` rewrites its WHEEL and RECORD
+    retag = subprocess.run(
+        [python, "-m", "wheel", "tags", "--remove", "--platform-tag", PLATFORM, wheel],
+        check=True, capture_output=True, text=True,
+    )
+    wheel = wheel.parent / retag.stdout.strip().splitlines()[-1]
     built = out / wheel.name
     built.write_bytes(wheel.read_bytes())
     print(f"Built {built} ({', '.join(natives)})")
@@ -180,7 +204,8 @@ def verify(args):
 
 def publish(args):
     """Upload each wheel and list it in index.json, replacing a build of the
-    same package version for the same ABI"""
+    same package version for the same ABI, then write the simple index
+    (`simple()`) from it"""
 
     def aws(*command):
         run("aws", "--endpoint-url", args.endpoint, "s3", *command)
@@ -211,7 +236,9 @@ def publish(args):
                 "file": wheel.name,
                 "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
             }
-            aws("cp", wheel, f"s3://{args.bucket}/wheels/{build['sha256']}/{wheel.name}")
+            # Keyed by hash, so never changed once there: cached for good
+            aws("cp", wheel, f"s3://{args.bucket}/wheels/{build['sha256']}/{wheel.name}",
+                "--cache-control", IMMUTABLE)
             # A rebuild of the same version replaces it; other versions stay,
             # for environments locked to them. The list stays in publishing
             # order: the builder pins new resolves to the last of each package.
@@ -222,8 +249,50 @@ def publish(args):
             ] + [build]
             print(f"Published {json.dumps(build)}")
 
+        site = Path(work) / "site"
+        for path, content in simple(index).items():
+            (site / path).parent.mkdir(parents=True, exist_ok=True)
+            (site / path).write_text(content)
+        # The index pages are written before index.json, so a builder that
+        # sees a wheel listed can be sure pip users can find it too
+        aws("cp", site, f"s3://{args.bucket}/", "--recursive",
+            "--content-type", "text/html", "--cache-control", CHANGING)
         index_path.write_text(json.dumps(index, indent=2) + "\n")
-        aws("cp", index_path, f"s3://{args.bucket}/index.json")
+        aws("cp", index_path, f"s3://{args.bucket}/index.json",
+            "--content-type", "application/json", "--cache-control", CHANGING)
+
+
+# Cache lifetimes: wheels never change, the index pages do on each publish
+IMMUTABLE = "public, max-age=31536000, immutable"
+CHANGING = "public, max-age=300"
+
+
+def simple(index):
+    """A PEP 503 simple index of `index`'s wheels for each ABI, as
+    {path: html}: `<abi>/simple/index.html` and
+    `<abi>/simple/<name>/index.html` (Cloudflare serves a path ending in `/`
+    from its index.html, as R2 doesn't)"""
+    pages = {}
+    for abi_name in sorted({build["abi"] for build in index["wheels"]}):
+        builds = [build for build in index["wheels"] if build["abi"] == abi_name]
+        names = sorted({build["name"] for build in builds})
+        pages[f"{abi_name}/simple/index.html"] = page(
+            "Simple index", [(f"{name}/", name) for name in names])
+        for name in names:
+            links = [
+                (f"../../../wheels/{build['sha256']}/{build['file']}#sha256={build['sha256']}",
+                 build["file"])
+                for build in builds if build["name"] == name
+            ]
+            pages[f"{abi_name}/simple/{name}/index.html"] = page(f"Links for {name}", links)
+    return pages
+
+
+def page(title, links):
+    anchors = "\n".join(
+        f'<a href="{html.escape(href)}">{html.escape(text)}</a><br>' for href, text in links)
+    return (f'<!DOCTYPE html>\n<html><head><meta name="pypi:repository-version" content="1.0">'
+            f"<title>{html.escape(title)}</title></head>\n<body>\n{anchors}\n</body></html>\n")
 
 
 def sandboxed(args):
@@ -282,8 +351,8 @@ def main():
 
     command = commands.add_parser("publish", help="Upload wheels and list them in the index")
     command.add_argument("wheels", nargs="+")
-    command.add_argument("--bucket", default="eryx-native-wheels")
-    command.add_argument("--endpoint", default="https://fly.storage.tigris.dev")
+    command.add_argument("--bucket", default=BUCKET)
+    command.add_argument("--endpoint", default=ENDPOINT)
     command.set_defaults(run=publish)
 
     args = parser.parse_args()
