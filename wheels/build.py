@@ -67,8 +67,11 @@ def abi():
     source = (REPO / "src/builder/native.rs").read_text()
     prefix = re.search(r'pub const ABI: &str = concat!\("([^"]+)"', source).group(1)
     mise = (REPO / "eryx/mise.toml").read_text()
-    sdk = re.search(r'^wasi_sdk_version = "wasi-sdk-(\d+)"$', mise, re.M).group(1)
-    return prefix + sdk
+    # As build.rs reads it: whatever's between `wasi-sdk-` and the quote
+    sdk = re.search(r'^wasi_sdk_version = "wasi-sdk-([^"]+)"$', mise, re.M)
+    if not sdk:
+        sys.exit('eryx/mise.toml has no wasi_sdk_version = "wasi-sdk-<N>"')
+    return prefix + sdk.group(1)
 
 
 def normalize(name):
@@ -258,8 +261,9 @@ def publish(args):
         aws("cp", site, f"s3://{args.bucket}/", "--recursive",
             "--content-type", "text/html", "--cache-control", CHANGING)
         index_path.write_text(json.dumps(index, indent=2) + "\n")
+        # Only builders read it, rarely, and they should see a publish at once
         aws("cp", index_path, f"s3://{args.bucket}/index.json",
-            "--content-type", "application/json", "--cache-control", CHANGING)
+            "--content-type", "application/json", "--cache-control", "no-cache")
 
 
 # Cache lifetimes: wheels never change, the index pages do on each publish

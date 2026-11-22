@@ -103,8 +103,8 @@ URL rewrite serving a path ending in `/` from its `index.html`, which R2
 doesn't do itself). It lists each wheel in `index.json` with the ABI it's
 for (`native::ABI`), which builders read, and writes a PEP 503 simple
 index per ABI from it for pip (`<abi>/simple/<package>/`). Wheels are
-cached for good (their keys have their hash); the index pages and
-`index.json` for 5 minutes.
+cached for good (their keys have their hash) and the index pages for 5
+minutes; `index.json` isn't cached, so builders see a publish at once.
 
 A rebuild of the same version replaces it; older versions stay listed, so
 environments locked to them still rebuild, and new resolves are pinned to
@@ -138,7 +138,8 @@ incompatibly some other way.
 ## Using the wheels elsewhere
 
 Anything that runs eryx's runtime can install them with pip, for the WASI
-platform, into a directory to use as site-packages:
+platform, into a directory to use as site-packages. The index is the ABI's,
+`native::ABI` (`cp314-wasip2-sdk33` as of eryx's wasi-sdk 33):
 
 ```sh
 pip install --target site-packages --only-binary :all: \
