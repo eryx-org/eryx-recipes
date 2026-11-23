@@ -194,8 +194,9 @@ jobs:
       - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.8
-          # cargo-about for the notices.
-          install_args: rust aqua:bytecodealliance/wasmtime cargo:cargo-about
+          # cargo-about for the notices, wasm-tools for find's smoke check
+          # (which runs on a cache hit too, when build-cli doesn't install it).
+          install_args: rust aqua:bytecodealliance/wasmtime cargo:cargo-about cargo:wasm-tools
           cache: false
       # Before the key, which hashes the fetched recipe.
       - if: matrix.cli == 'coreutils'
