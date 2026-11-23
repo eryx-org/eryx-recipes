@@ -83,6 +83,19 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      # Where the build lanes run: the eryx-desktop runner (eryx-org/eryx-run's
+      # scripts/desktop-runner) when the DESKTOP_RUNNER repo variable is `on`,
+      # for pushes to main and same-repo PRs; ubuntu-latest otherwise. The
+      # weekly and manual runs build what's published, signed and attested,
+      # so they always use GitHub's runners. A fork can edit this expression,
+      # so it isn't the fork boundary (should the repo go public): the runner
+      # group's public-repo setting and the approval requirement for outside
+      # contributors are.
+      runner: >-
+        ${{ (vars.DESKTOP_RUNNER == 'on'
+        && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+        || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)))
+        && '["self-hosted","eryx-desktop"]' || '"ubuntu-latest"' }}
       rust: ${{ steps.filter.outputs.rust }}
       c: ${{ steps.filter.outputs.c }}
       go: ${{ steps.filter.outputs.go }}
@@ -182,7 +195,7 @@ jobs:
     name: Build ${{ matrix.cli }} (Rust lane)
     needs: changes
     if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:
@@ -274,7 +287,7 @@ jobs:
     name: Build ${{ matrix.cli }} (C lane)
     needs: changes
     if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.c == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:
@@ -374,7 +387,7 @@ jobs:
     name: Build gh (Go lane)
     needs: changes
     if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
