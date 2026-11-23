@@ -39,7 +39,7 @@ jobs:
     outputs:
       recipes: ${{ steps.list.outputs.recipes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # Just the recipes a change touches, as builds take minutes each; all
@@ -61,13 +61,13 @@ jobs:
   build:
     needs: recipes
     if: needs.recipes.outputs.recipes != '[]'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
         recipe: ${{ fromJSON(needs.recipes.outputs.recipes) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -79,7 +79,7 @@ jobs:
       - name: Test in eryx
         run: python3 native/build.py verify dist/*.whl "native/${{ matrix.recipe }}" --precompile target/release/eryx-precompile
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.recipe }}
           path: dist/*.whl
@@ -92,11 +92,11 @@ jobs:
     environment: native-wheels
     steps:
       # The eryx submodule too: the ABI has its wasi-sdk version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheel-*
           path: dist

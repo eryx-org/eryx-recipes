@@ -27,7 +27,7 @@ jobs:
     if: >-
       github.event.label.name == 'build-native' &&
       contains(github.event.issue.labels.*.name, 'native-package')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     permissions:
       contents: write
@@ -36,7 +36,7 @@ jobs:
       id-token: write
     steps:
       # No token left in .git/config for the sdist's build code to find
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
