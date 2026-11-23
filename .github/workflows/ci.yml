@@ -159,7 +159,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           install_args: rust
           cache: false
       - uses: ./.github/actions/eryx-build
@@ -196,7 +196,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           # cargo-about for the notices, wasm-tools for find's smoke check
           # (which runs on a cache hit too, when build-cli doesn't install it).
           install_args: rust aqua:bytecodealliance/wasmtime cargo:cargo-about cargo:wasm-tools
@@ -290,7 +290,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           # wit-bindgen for git's bindings, wasm-tools for its smoke check.
           install_args: rust aqua:bytecodealliance/wasmtime github:bytecodealliance/wit-bindgen cargo:wasm-tools
           cache: false
@@ -382,7 +382,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           install_args: rust cargo:wasm-tools aqua:bytecodealliance/wasmtime
           cache: false
       - name: Hash the build inputs
@@ -484,7 +484,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           install_args: rust cargo:wkg aqua:sigstore/cosign aqua:oras-project/oras
           cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -566,7 +566,7 @@ jobs:
       - uses: ./.github/actions/setup-binstall
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           install_args: rust cargo:wkg
           cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -630,7 +630,7 @@ jobs:
           fetch-depth: 0
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          version: 2026.11.8
+          version: 2026.11.12
           install_args: aqua:sigstore/cosign aqua:oras-project/oras
           cache: false
       # Only a real publish's artifacts get signed: a PR or branch run can
