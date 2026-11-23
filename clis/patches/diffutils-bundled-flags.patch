@@ -1,0 +1,82 @@
+diff --git a/src/params.rs b/src/params.rs
+index 61ee9d1..6748bb6 100644
+--- a/src/params.rs
++++ b/src/params.rs
+@@ -129,12 +129,42 @@ fn extra_operand(executable: &OsStr, param: &OsStr) -> String {
+     )
+ }
+ 
++/// Short options that take no argument, which may be bundled: `-ru` is `-r -u`.
++const BUNDLEABLE_FLAGS: &str = "sqNrateyupc";
++
++/// The arguments with bundled short options split up (`-Naur` becomes `-N -a
++/// -u -r`), as getopt allows. Only an argument made up entirely of
++/// [`BUNDLEABLE_FLAGS`] is split, so `-U3` and `-Fpattern` are left alone, and
++/// nothing after `--` is touched.
++fn split_bundled_flags(args: Vec<OsString>) -> Vec<OsString> {
++    let mut out = Vec::with_capacity(args.len());
++    let mut args = args.into_iter();
++    // The program name is never an option.
++    out.extend(args.next());
++    for arg in args.by_ref() {
++        if arg == "--" {
++            out.push(arg);
++            break;
++        }
++        match arg.to_str().and_then(|a| a.strip_prefix('-')) {
++            Some(flags)
++                if flags.len() > 1 && flags.chars().all(|c| BUNDLEABLE_FLAGS.contains(c)) =>
++            {
++                out.extend(flags.chars().map(|c| OsString::from(format!("-{c}"))));
++            }
++            _ => out.push(arg),
++        }
++    }
++    out.extend(args);
++    out
++}
++
+ /// Parses the command line, and also returns its arguments other than the
+ /// program name and the operands.
+ pub fn parse_params<I: Iterator<Item = OsString>>(
+     opts: Peekable<I>,
+ ) -> Result<(Params, Vec<OsString>), String> {
+-    let args: Vec<OsString> = opts.collect();
++    let args = split_bundled_flags(opts.collect());
+     // Each argument comes with its position, to tell the operands apart from
+     // an option argument with the same value.
+     let mut opts = args.iter().cloned().enumerate().peekable();
+@@ -625,6 +655,33 @@ fn match_unified_diff_params(
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn bundled_flags() {
++        let parse = |args: &[&str]| {
++            let args = std::iter::once("diff")
++                .chain(args.iter().copied())
++                .chain(["foo", "bar"]);
++            parse_params(args.map(os).peekable())
++        };
++        let params = parse(&["-Naur"]).unwrap();
++        assert!(params.recursive && params.text);
++        assert_eq!(params.missing_file, MissingFile::Empty);
++        assert_eq!(params.format, Format::Unified);
++        assert!(parse(&["-rq"]).unwrap().brief);
++        // Options that take a value aren't split.
++        assert_eq!(parse(&["-U3"]).unwrap().context_count, 3);
++        assert!(parse(&["-rx"]).is_err());
++        // After --, a bundle is an operand.
++        let params = parse_params(
++            [os("diff"), os("--"), os("-ru"), os("bar")]
++                .iter()
++                .cloned()
++                .peekable(),
++        )
++        .unwrap();
++        assert_eq!(params.from, os("-ru"));
++    }
++
+     fn parse_params<I: Iterator<Item = OsString>>(opts: Peekable<I>) -> Result<Params, String> {
+         super::parse_params(opts).map(|(params, _)| params)
+     }
