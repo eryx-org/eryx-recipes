@@ -49,6 +49,8 @@ REPO = Path(__file__).resolve().parent.parent
 # wasi-wheels use (there's no PEP for WASI tags yet). It doesn't say which
 # wasi-sdk or libpython a wheel needs, so the index is per ABI (`abi()`).
 PLATFORM = "wasi_0_0_0_wasm32"
+# Where recipes build, each in a directory of its own (see `build`)
+WORK = Path("/tmp/eryx-native")
 
 # Where `publish` puts wheels, served at https://wheels.eryx.run through
 # Cloudflare's cache (R2's public custom domain)
@@ -96,7 +98,13 @@ def build(args):
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     sdk = Path(os.environ["WASI_SDK_PATH"])
-    work = Path(tempfile.mkdtemp(prefix=f"native-{spec['name']}-"))
+    # Builds are reproducible: the same recipe and toolchain give the same
+    # wheel, so publishing a rebuild doesn't change a locked hash. The work
+    # directory is fixed, not random, as backends record paths under it (numpy's
+    # __config__.py keeps the compiler's and the venv's)
+    work = WORK / spec["name"]
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
 
     # The sdist, checked against the recipe's hash
     archive = work / spec["sdist"].rsplit("/", 1)[-1]
@@ -108,6 +116,9 @@ def build(args):
     src = work / "src"
     src.mkdir()
     with tarfile.open(archive) as tar:
+        # Backends stamp the files they generate with SOURCE_DATE_EPOCH, if
+        # set, rather than the time of the build: the sdist's newest file's
+        epoch = str(int(max(member.mtime for member in tar.getmembers())))
         tar.extractall(src, filter="data")
     (top,) = src.iterdir()
     for patch in sorted(recipe.glob("*.patch")):
@@ -151,6 +162,7 @@ def build(args):
         "SYSROOT": str(sysroot),
         "WHEEL_DIR": str(work / "dist"),
         "NATIVE_DEPS": str(native_deps),
+        "SOURCE_DATE_EPOCH": epoch,
         **spec.get("env", {}),
     }
     if (recipe / "build.sh").exists():
@@ -168,7 +180,7 @@ def build(args):
     # every wheel gets PLATFORM; `wheel tags` rewrites its WHEEL and RECORD
     retag = subprocess.run(
         [python, "-m", "wheel", "tags", "--remove", "--platform-tag", PLATFORM, wheel],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, env={**os.environ, "SOURCE_DATE_EPOCH": epoch},
     )
     wheel = wheel.parent / retag.stdout.strip().splitlines()[-1]
     built = out / wheel.name

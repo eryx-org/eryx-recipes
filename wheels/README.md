@@ -60,6 +60,15 @@ in a Python 3.14 venv, cross-compiling for `wasm32-wasip2`:
 - `$SYSROOT` is the sysroot (`include/`, `lib/`, `sysconfig/`).
 - `$NATIVE_DEPS` has the recipe's `native_requires`, unpacked.
 
+Builds are reproducible: the same recipe, sdist and toolchain give the same
+wheel, byte for byte, so a rebuild publishes the file that's already listed
+and hashes locked against the index stay valid. Each recipe builds in
+`/tmp/eryx-native/<package>`, not a random directory, as backends record
+paths under it (numpy's `__config__.py` keeps the compiler's and the venv's),
+and `SOURCE_DATE_EPOCH` is the sdist's newest file's time, so the files a
+build generates aren't stamped with the time it ran. A recipe whose output
+still varies needs that fixed in its `build.sh` or a patch.
+
 The sysroot comes from `native/sysroot.sh`: CPython's headers and
 sysconfig, configured as componentize-py builds eryx's libpython. The
 wheel must contain a `.so`; WASI has no threads, processes, signals or
@@ -106,7 +115,8 @@ index per ABI from it for pip (`<abi>/simple/<package>/`). Wheels are
 cached for good (their keys have their hash) and the index pages for 5
 minutes; `index.json` isn't cached, so builders see a publish at once.
 
-A rebuild of the same version replaces it; older versions stay listed, so
+A rebuild of the same version replaces it (and as builds are reproducible,
+with the same file unless its inputs changed); older versions stay listed, so
 environments locked to them still rebuild, and new resolves are pinned to
 the newest. Every deployment reads the same bucket, so a merged recipe is
 installable everywhere once it's published, without a deploy. Environments
