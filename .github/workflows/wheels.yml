@@ -38,6 +38,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       recipes: ${{ steps.list.outputs.recipes }}
+      # Where build runs: the eryx-desktop runner (scripts/desktop-runner)
+      # when the DESKTOP_RUNNER repo variable is `on`, for same-repo PRs.
+      # Main's builds are what publish uploads to the public bucket, so they
+      # always use GitHub's runners (Ubuntu 26.04, as the desktop's VMs). A
+      # fork can edit this expression, so it isn't the fork boundary (should
+      # the repo go public): the runner group's public-repo setting is.
+      runner: >-
+        ${{ (vars.DESKTOP_RUNNER == 'on'
+        && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository)
+        && '["self-hosted","eryx-desktop"]' || '"ubuntu-26.04"' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,7 +72,7 @@ jobs:
   build:
     needs: recipes
     if: needs.recipes.outputs.recipes != '[]'
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(needs.recipes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:

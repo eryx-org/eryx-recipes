@@ -72,7 +72,7 @@ jobs:
                the trouble is.
             3. Build and test it, until both pass, always with --sandbox (the sdist's
                build code is untrusted, and the sandbox keeps it away from this job's
-               credentials; it's an ubuntu:24.04 container with build-essential, so
+               credentials; it's an ubuntu:26.04 container with build-essential, so
                install anything else, such as rustup, in build.sh):
                  python3 native/build.py build native/<package> --sysroot "$SYSROOT" --out /tmp/wheels --sandbox
                  python3 native/build.py verify /tmp/wheels/<wheel> native/<package> --precompile target/release/eryx-precompile --sandbox

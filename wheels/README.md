@@ -86,7 +86,7 @@ native/build.py verify /tmp/wheels/markupsafe-*.whl native/markupsafe
 
 `verify` needs `target/release/eryx-precompile` (`mise run eryx-precompile`).
 Add `--sandbox` to `build` or `verify` to run it in a throwaway Docker
-container (`ubuntu:24.04` with `build-essential`) that has only the recipes,
+container (`ubuntu:26.04` with `build-essential`) that has only the recipes,
 the toolchain and the output mounted: for building packages you haven't
 reviewed, as the agent does. A `build.sh` that needs more (e.g. `rustup`)
 installs it there.

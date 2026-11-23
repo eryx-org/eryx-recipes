@@ -59,7 +59,7 @@ ENDPOINT = "https://944ab6808cfb80c606e4873f8e6c2344.r2.cloudflarestorage.com"
 
 # What a sandboxed build runs in; recipes that need more (e.g. rustup)
 # install it in their build.sh
-SANDBOX_IMAGE = "ubuntu:24.04"
+SANDBOX_IMAGE = "ubuntu:26.04"
 SANDBOX_PACKAGES = "python3 patch ca-certificates curl build-essential"
 
 
