@@ -55,6 +55,7 @@ WORK = Path("/tmp/eryx-native")
 # Where `publish` puts wheels, served at https://wheels.eryx.run through
 # Cloudflare's cache (R2's public custom domain)
 BUCKET = "eryx-wheels"
+INDEX_URL = "https://wheels.eryx.run/index.json"
 ENDPOINT = "https://944ab6808cfb80c606e4873f8e6c2344.r2.cloudflarestorage.com"
 
 # What a sandboxed build runs in; recipes that need more (e.g. rustup)
@@ -74,6 +75,51 @@ def abi():
     if not sdk:
         sys.exit('eryx/mise.toml has no wasi_sdk_version = "wasi-sdk-<N>"')
     return prefix + sdk.group(1)
+
+
+def inputs(recipe):
+    """A hash of everything a recipe's wheel is built from: its recipe
+    directory and its native_requires' (recursively), this script, what the
+    sysroot is made of, and the ABI. Builds are reproducible, so a recipe
+    whose inputs are already published needs no build. Build requirements a
+    recipe doesn't pin aren't in it: change the recipe to pick up new ones"""
+    digest = hashlib.sha256(abi().encode())
+    seen = set()
+
+    def add(path):
+        digest.update(f"\0{path.relative_to(REPO)}\0".encode())
+        digest.update(path.read_bytes())
+
+    def add_recipe(recipe):
+        recipe, spec = load(recipe)
+        if recipe in seen:
+            return
+        seen.add(recipe)
+        for path in sorted(recipe.rglob("*")):
+            if path.is_file() and "__pycache__" not in path.parts:
+                add(path)
+        for dep in spec.get("native_requires", []):
+            add_recipe(REPO / "native" / dep)
+
+    add_recipe(recipe)
+    for path in (Path(__file__).resolve(), REPO / "native/sysroot.sh",
+                 REPO / "eryx/crates/eryx-runtime/libs/libpython3.14.so.zst"):
+        add(path)
+    return digest.hexdigest()
+
+
+def unpublished(args):
+    """Print the recipes whose inputs (`inputs()`) aren't published yet"""
+    # Cloudflare refuses urllib's default User-Agent
+    request = urllib.request.Request(INDEX_URL, headers={"User-Agent": "eryx-run-native-build"})
+    with urllib.request.urlopen(request) as response:
+        index = json.load(response)
+    published = {(build["name"], build["version"], build["abi"], build.get("inputs"))
+                 for build in index["wheels"]}
+    for recipe in args.recipes:
+        path, spec = load(REPO / "native" / recipe)
+        if (normalize(spec["name"]), spec["version"], abi(), inputs(path)) not in published:
+            print(recipe)
 
 
 def normalize(name):
@@ -250,6 +296,9 @@ def publish(args):
                 "abi": abi(),
                 "file": wheel.name,
                 "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+                # What it was built from, for `unpublished`; recipes are
+                # named as their packages
+                "inputs": inputs(REPO / "native" / normalize(name)),
             }
             # Keyed by hash, so never changed once there: cached for good
             aws("cp", wheel, f"s3://{args.bucket}/wheels/{build['sha256']}/{wheel.name}",
@@ -364,6 +413,10 @@ def main():
     command.add_argument("--precompile", default="target/release/eryx-precompile")
     command.add_argument("--sandbox", action="store_true", help="Verify in a throwaway container")
     command.set_defaults(run=verify)
+
+    command = commands.add_parser("unpublished", help="List the recipes whose inputs aren't published")
+    command.add_argument("recipes", nargs="+")
+    command.set_defaults(run=unpublished)
 
     command = commands.add_parser("publish", help="Upload wheels and list them in the index")
     command.add_argument("wheels", nargs="+")

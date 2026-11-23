@@ -115,8 +115,12 @@ index per ABI from it for pip (`<abi>/simple/<package>/`). Wheels are
 cached for good (their keys have their hash) and the index pages for 5
 minutes; `index.json` isn't cached, so builders see a publish at once.
 
-A rebuild of the same version replaces it (and as builds are reproducible,
-with the same file unless its inputs changed); older versions stay listed, so
+Each wheel's entry also has a hash of what it was built from (`inputs` in
+`build.py`: the recipe and its `native_requires`, `build.py`, the sysroot's
+inputs and the ABI), and CI builds only recipes whose inputs aren't listed
+(`build.py unpublished`), so an eryx or workflow bump that changes none of
+them builds nothing. A rebuild of the same version replaces it (and as builds
+are reproducible, with the same file unless its inputs changed); older versions stay listed, so
 environments locked to them still rebuild, and new resolves are pinned to
 the newest. Every deployment reads the same bucket, so a merged recipe is
 installable everywhere once it's published, without a deploy. Environments

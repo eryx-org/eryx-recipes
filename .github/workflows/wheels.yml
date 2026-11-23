@@ -50,12 +50,17 @@ jobs:
         && github.event.pull_request.head.repo.full_name == github.repository)
         && '["self-hosted","eryx-desktop"]' || '"ubuntu-26.04"' }}
     steps:
+      # The eryx submodule too: the ABI and libpython are build inputs
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          submodules: true
       # Just the recipes a change touches, as builds take minutes each; all
       # of them when anything else changes (build.py, the sysroot, the
-      # workflow, eryx, the ABI), or when there's nothing to compare with
+      # workflow, eryx, the ABI), or when there's nothing to compare with.
+      # Then only those whose inputs aren't published already: builds are
+      # reproducible, so an eryx or workflow change that leaves a recipe's
+      # inputs alone would rebuild the wheel that's there
       - id: list
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -66,6 +71,9 @@ jobs:
             recipes=$(grep -oP '^native/\K[^/]+(?=/)' <<< "$changed" | sort -u | grep -Fxf <(echo "$all") || true)
           else
             recipes=$all
+          fi
+          if [ -n "$recipes" ]; then
+            recipes=$(python3 native/build.py unpublished $recipes)
           fi
           echo "recipes=$(jq -Rc 'select(length > 0)' <<< "$recipes" | jq -sc .)" >> "$GITHUB_OUTPUT"
 
