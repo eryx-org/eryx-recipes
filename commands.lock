@@ -65,12 +65,25 @@ version = "8.20.0-r.3"
 digest = "sha256:6917a54d3b2b1dee5a02089309efeaf3e442c69b94d9647f1739fe839b15a965"
 
 [[packages]]
+name = "eryx:diffutils"
+
+[[packages.versions]]
+requirement = "=0.6.0-r.1"
+version = "0.6.0-r.1"
+digest = "sha256:09215b84e7b73368c7e5726fd3ce0397182a6ce33b5b79a3a411ba6e55d2adab"
+
+[[packages]]
 name = "eryx:find"
 
 [[packages.versions]]
 requirement = "=0.11.0-r.2"
 version = "0.11.0-r.2"
 digest = "sha256:556917df2d064fddcea9579fbd332907d6977dd495e32ededaeeb823b7e25b00"
+
+[[packages.versions]]
+requirement = "=0.11.0-r.3"
+version = "0.11.0-r.3"
+digest = "sha256:5d3f5ea5894c1ebee2e6eac58644de5e25bc0be7fd1d927b054106760591df1a"
 
 [[packages]]
 name = "eryx:gh"
