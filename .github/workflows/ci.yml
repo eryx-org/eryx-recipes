@@ -2,8 +2,8 @@
 # smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
 # Which lanes run when:
-# - Rust (rg, sd, jaq, sed, find, and coreutils from eryx's recipe), C
-#   (sqlite3, curl, jq, awk, git) and Go (gh): when the build pins
+# - Rust (rg, sd, jaq, sed, find, diffutils, and coreutils from eryx's
+#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gh): when the build pins
 #   (mise.toml), this workflow, smoke.sh, what the notices are made from, or
 #   one of the lane's manifests, patches, shims or WIT change.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
@@ -124,6 +124,9 @@ jobs:
               - 'clis/patches/sed-wasi.patch'
               - 'clis/patches/patch-find.sh'
               - 'clis/patches/find-wasi.patch'
+              - 'clis/diffutils.toml'
+              - 'clis/patches/patch-diffutils.sh'
+              - 'clis/patches/diffutils-bundled-flags.patch'
             c:
               - *driver
               - 'clis/curl.toml'
@@ -185,7 +188,7 @@ jobs:
       matrix:
         # coreutils is built from eryx's recipe, fetched at vars.coreutils_rev
         # in mise.toml (so the driver filter covers its pin).
-        cli: [rg, sd, jaq, sed, find, coreutils]
+        cli: [rg, sd, jaq, sed, find, diffutils, coreutils]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

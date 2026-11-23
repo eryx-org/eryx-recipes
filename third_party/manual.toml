@@ -106,6 +106,20 @@ cli = "clis/sed.toml"
 cli_commit = "3b464d115afddedf2271ff7b3d9564aa2103d752"
 
 [[component]]
+name = "uutils diffutils"
+version = "0.6.0+main (feb8997e)"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/uutils/diffutils/tree/feb8997eeabbab58c31926ac3aaa1211189f4f4f"
+files = [
+    "third_party/licenses/diffutils-COPYRIGHT",
+    "third_party/licenses/diffutils-LICENSE-MIT",
+    "third_party/licenses/diffutils-LICENSE-APACHE",
+]
+artifacts = ["diffutils"]
+cli = "clis/diffutils.toml"
+cli_commit = "feb8997eeabbab58c31926ac3aaa1211189f4f4f"
+
+[[component]]
 name = "uutils findutils"
 version = "0.11.0 (2cb3adea)"
 license = "MIT"
@@ -301,7 +315,7 @@ files = [
 ]
 rust_toolchain = "1.100.0"
 sysroot_strings = { paths = ["lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a"], strings = ["llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141"] }
-artifacts = ["rg", "sd", "jaq", "sed", "find", "coreutils"]
+artifacts = ["rg", "sd", "jaq", "sed", "find", "diffutils", "coreutils"]
 
 [[component]]
 name = "The Rust standard library"
@@ -320,7 +334,7 @@ files = [
     "third_party/licenses/rust-Unicode-3.0.txt",
 ]
 rust_toolchain = "1.100.0"
-artifacts = ["rg", "sd", "jaq", "sed", "find", "coreutils"]
+artifacts = ["rg", "sd", "jaq", "sed", "find", "diffutils", "coreutils"]
 
 [[component]]
 name = "The Go standard library (wasip3 fork)"
