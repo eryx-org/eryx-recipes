@@ -138,12 +138,26 @@ def run(*args, **kwargs):
     subprocess.run([str(arg) for arg in args], check=True, **kwargs)
 
 
+def fixed_path(name, target):
+    """WORK/name, a symlink to `target`"""
+    # Resolved first: a native_requires build is given this link itself
+    target = target.resolve(strict=True)
+    link = WORK / name
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.unlink(missing_ok=True)
+    link.symlink_to(target, target_is_directory=True)
+    return link
+
+
 def build(args):
     recipe, spec = load(args.recipe)
-    sysroot = Path(args.sysroot).resolve()
+    # The toolchain is reached through fixed paths too, so a build on another
+    # machine gives the same wheel: numpy's __config__.py records the
+    # sysroot's path in its compiler flags
+    sysroot = fixed_path("sysroot", Path(args.sysroot))
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    sdk = Path(os.environ["WASI_SDK_PATH"])
+    sdk = fixed_path("wasi-sdk", Path(os.environ["WASI_SDK_PATH"]))
     # Builds are reproducible: the same recipe and toolchain give the same
     # wheel, so publishing a rebuild doesn't change a locked hash. The work
     # directory is fixed, not random, as backends record paths under it (numpy's

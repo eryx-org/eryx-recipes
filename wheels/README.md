@@ -65,7 +65,10 @@ wheel, byte for byte, so a rebuild publishes the file that's already listed
 and hashes locked against the index stay valid. Each recipe builds in
 `/tmp/eryx-native/<package>`, not a random directory, as backends record
 paths under it (numpy's `__config__.py` keeps the compiler's and the venv's),
-and `SOURCE_DATE_EPOCH` is the sdist's newest file's time, so the files a
+and reaches the sysroot and wasi-sdk through `/tmp/eryx-native/sysroot` and
+`/tmp/eryx-native/wasi-sdk` (numpy records the sysroot in its compiler
+flags), so a build on another machine gives the same wheel too. And
+`SOURCE_DATE_EPOCH` is the sdist's newest file's time, so the files a
 build generates aren't stamped with the time it ran. A recipe whose output
 still varies needs that fixed in its `build.sh` or a patch.
 
