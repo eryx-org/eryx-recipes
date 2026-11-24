@@ -52,7 +52,7 @@ wasi_sdk_version = "wasi-sdk-33"
 # above 1 (the smoke tests check them), and eryx-org/eryx#1190, whose
 # `std_tool` and Go-lane `[build] wit` build Go's own commands (go and its
 # tools).
-eryx_rev = "72bd53b2e1d444905bcefd3ba1da3489ccd186bd"
+eryx_rev = "2a64970cc3da33b63e662de4d110c7b142f8d1f7"
 # The eryx commit coreutils' recipe (clis/coreutils.toml and its uucore patch)
 # is fetched from: eryx keeps building it for its embedded coreutils, and we
 # publish the same build. `mise run bump-coreutils` moves it.
