@@ -382,10 +382,10 @@ index 00000000..e63887ed
 +	return result
 +}
 diff --git a/src/internal/wasi/cm.go b/src/internal/wasi/cm.go
-index fd8fdc2b..80c85c15 100644
+index fd8fdc2b..23e794c4 100644
 --- a/src/internal/wasi/cm.go
 +++ b/src/internal/wasi/cm.go
-@@ -167,6 +167,11 @@ func cabiRealloc(oldPtr, oldSize, align, newSize int32) int32 {
+@@ -167,6 +167,13 @@ func cabiRealloc(oldPtr, oldSize, align, newSize int32) int32 {
  	if CabiUseStatic {
  		return staticRealloc(oldPtr, oldSize, newSize)
  	}
@@ -393,11 +393,13 @@ index fd8fdc2b..80c85c15 100644
 +		if p := arenaRealloc(oldPtr, oldSize, newSize); p != 0 {
 +			return p
 +		}
++		// The heap is what the arena is for avoiding.
++		panic("cabi_realloc: the host returned more than the arena holds")
 +	}
  
  	totalSize := int(reallocHeaderSize) + int(newSize)
  
-@@ -287,7 +292,7 @@ func FreeResult(ptr unsafe.Pointer) {
+@@ -287,7 +294,7 @@ func FreeResult(ptr unsafe.Pointer) {
  // Called automatically by [CopyString] and by generated list wrappers
  // after data has been copied into Go-owned memory.
  func FreeRealloc(ptr int32) {
@@ -406,7 +408,7 @@ index fd8fdc2b..80c85c15 100644
  		return
  	}
  	headerPtr := uintptr(ptr) - reallocHeaderSize
-@@ -338,3 +343,60 @@ func IsReturned(status int32) bool {
+@@ -338,3 +345,61 @@ func IsReturned(status int32) bool {
  func Subtask(status int32) int32 {
  	return status >> HandleShift
  }
@@ -450,7 +452,8 @@ index fd8fdc2b..80c85c15 100644
 +}
 +
 +// arenaRealloc bump-allocates [header | data] from the arena, 8-byte
-+// aligned. It returns 0 if the arena is full.
++// aligned. It returns 0 if the arena is full: size it for the most the host
++// can return.
 +func arenaRealloc(oldPtr, oldSize, newSize int32) int32 {
 +	total := (int(reallocHeaderSize) + int(newSize) + 7) &^ 7
 +	if arenaOff+total > len(arena) {
