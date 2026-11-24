@@ -22,6 +22,13 @@ After a build, `mise run notices -- OUTDIR rg` writes the command's third-party 
 
 `build-cli` installs eryx-build from eryx-org/eryx at `mise.toml`'s `eryx_rev` into `scratch/tools` the first time. C recipes need the WASI SDK (`mise run ensure-wasi-sdk`), and gh needs the wasip3 Go fork (`scripts/bootstrap-go-wasip3.sh`). Sources and outputs go in the git-ignored `scratch/`.
 
+Go itself is four commands, built from the fork's own tree (eryx-build's `std_tool`) with `clis/patches/go-wasip3.patch`:
+
+- `go` runs `go-compile`, `go-asm` and `go-link` through `eryx:process/run`, so it only builds inside eryx, registered with `allow_spawn`. Its child commands share eryx's child memory pool, which defaults to 256 MiB; linking gh needed more than 512 MiB (1 GiB worked).
+- After `mise run build-cli -- go`, `scripts/go-root.sh` writes `goroot.tar.gz` into its component dir. That's the GOROOT go needs (`go/`: the fork's standard library source and `go.env`) and a prebuilt standard library cache (`gocache/`). Mount them, and set `GOROOT` and `GOCACHE` to them.
+- Modules must be vendored: go.env sets `GOPROXY=off`.
+- CI uploads the archive as the `go-root` artifact. It isn't published yet, because eryx can't mount it yet.
+
 ## Publishing
 
 Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its name (`[eryx.rg]` is `eryx:rg`).

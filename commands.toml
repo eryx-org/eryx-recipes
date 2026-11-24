@@ -27,6 +27,9 @@
 # - `pins` (optional): mise.toml pins its build uses that its lane doesn't,
 #   as `<table>.<key>` (`["vars.wasi_sdk_version"]` for a Rust command that
 #   compiles C). They count as build inputs, like the lane's.
+# - `files` (optional): repo files its build uses that its recipe doesn't
+#   name, such as a script writing something beside the component. They count
+#   as build inputs too.
 
 # The same build as eryx's embedded coreutils, from eryx's recipe
 # (eryx-commands#7).
@@ -76,3 +79,23 @@ version = "3.53.2-r.4"
 
 [eryx-gpl.git]
 version = "2.56.1-r.4"
+
+# Go's own commands, from the wasip3 Go fork (clis/go.toml): go runs the
+# other three through eryx:process/run.
+[eryx.go]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+# It writes the GOROOT go runs with, goroot.tar.gz, beside the component.
+files = ["scripts/go-root.sh"]
+
+[eryx.go-compile]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+
+[eryx.go-asm]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+
+[eryx.go-link]
+version = "1.27.4-r.1"
+upstream = "1.27.4"

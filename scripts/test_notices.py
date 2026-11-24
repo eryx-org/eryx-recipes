@@ -1,6 +1,9 @@
 """Tests for notices.py: `python3 -m unittest discover -s scripts`."""
 
+import tempfile
+import textwrap
 import unittest
+from pathlib import Path
 
 import notices
 
@@ -41,6 +44,26 @@ class Sbom(unittest.TestCase):
     def test_published_version(self):
         self.assertRegex(notices.published_version("sd"), r"-r\.[1-9][0-9]*$")
         self.assertRegex(notices.published_version("git"), r"-r\.[1-9][0-9]*$")
+
+
+class GoModules(unittest.TestCase):
+    def test_vendored_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vendor = Path(tmp)
+            (vendor / "modules.txt").write_text(textwrap.dedent("""\
+                # golang.org/x/mod v0.36.1
+                ## explicit; go 1.25.0
+                golang.org/x/mod/modfile
+                golang.org/x/mod/semver
+                # golang.org/x/sync v0.20.0
+                ## explicit; go 1.25.0
+                golang.org/x/sync/errgroup
+            """))
+            self.assertEqual(notices.vendored_modules(vendor), {
+                "golang.org/x/mod/modfile": ("golang.org/x/mod", "v0.36.1"),
+                "golang.org/x/mod/semver": ("golang.org/x/mod", "v0.36.1"),
+                "golang.org/x/sync/errgroup": ("golang.org/x/sync", "v0.20.0"),
+            })
 
 
 if __name__ == "__main__":
