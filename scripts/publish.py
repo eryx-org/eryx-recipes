@@ -234,6 +234,18 @@ def entry_pins(entry: dict) -> list:
     return pins
 
 
+def entry_files(root: Path, entry: dict) -> list[str]:
+    """The repo files a commands.toml entry adds to its recipe's build
+    inputs (`files`): ones its build uses that its recipe doesn't name, such
+    as a script that writes something beside the component. Each must
+    exist."""
+    files = strings(entry.get("files", []))
+    for f in files:
+        if not (root / f).exists():
+            raise Error(f"`files` names {f}, which isn't in the repo")
+    return files
+
+
 def pin_values(mise: dict, pins: list) -> list:
     return [mise.get(table, {}).get(key) for table, key in pins]
 
@@ -251,6 +263,7 @@ def cache_key(root: Path, name: str) -> str:
     manifest = tomllib.loads((root / rel).read_text())
     mise = tomllib.loads((root / "mise.toml").read_text())
     paths, pins = build_inputs(root, rel, manifest)
+    paths = paths + entry_files(root, entry)
     # A fetched recipe is hashed from its fetched copy, but say its pin too.
     # Every command's smoke test runs under wasmtime, and a cached cwasm
     # only loads under the one that compiled it.
@@ -369,6 +382,7 @@ def check_versions(root: Path, base: str | None) -> list[str]:
             problems.append(f"{label}: a new upstream version starts at r.1, not r.{revision}")
         try:
             paths, pins = build_inputs(root, rel, manifest)
+            paths = paths + entry_files(root, entry)
             pins = pins + entry_pins(entry)
         except Error as e:
             problems.append(f"{label}: {e}")

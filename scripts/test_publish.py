@@ -290,6 +290,25 @@ class CheckVersions(ScratchRepo):
         # curl's lane uses the WASI SDK too.
         self.assertEqual(sorted(p.split(":")[1] for p in self.problems()), ["curl", "sd"])
 
+    def test_an_entrys_files_need_a_new_revision(self):
+        self.write("scripts/extra.sh", "echo 1\n")
+        self.write("commands.toml", (self.root / "commands.toml").read_text().replace(
+            '[eryx.sd]', '[eryx.sd]\nfiles = ["scripts/extra.sh"]'))
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.write("scripts/extra.sh", "echo 2\n")
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("eryx:sd", problem)
+        self.assertIn("scripts/extra.sh", problem)
+
+    def test_an_entrys_missing_file_is_a_problem(self):
+        self.write("commands.toml", (self.root / "commands.toml").read_text().replace(
+            '[eryx.sd]', '[eryx.sd]\nfiles = ["scripts/gone.sh"]'))
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("scripts/gone.sh", problem)
+
     def test_a_patch_scripts_missing_relative_path_is_a_problem(self):
         self.write("clis/patches/patch-sd.sh", 'cp "$dir/../shims/gone.h" x\n')
         self.commit()
@@ -498,6 +517,15 @@ class CacheKey(ScratchRepo):
             '[eryx.sd]', '[eryx.sd]\npins = ["vars.wasi_sdk_version"]'))
         sd = self.keys()[0]
         self.write("mise.toml", mise.replace("wasi-sdk-33", "wasi-sdk-34"))
+        self.assertNotEqual(self.keys()[0], sd)
+
+    def test_an_entrys_files_are_inputs(self):
+        self.write("scripts/extra.sh", "echo 1\n")
+        self.write("commands.toml", (self.root / "commands.toml").read_text().replace(
+            '[eryx.sd]', '[eryx.sd]\nfiles = ["scripts/extra.sh"]'))
+        sd, curl = self.keys()
+        self.write("scripts/extra.sh", "echo 2\n")
+        self.assertEqual(self.keys(), (self.keys()[0], curl))
         self.assertNotEqual(self.keys()[0], sd)
 
     def test_a_missing_input_fails(self):
