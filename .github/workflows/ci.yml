@@ -504,14 +504,6 @@ jobs:
             scratch/${{ matrix.cli }}-component/${{ matrix.cli }}.spdx.json
           if-no-files-found: error
           retention-days: 14
-      # Not a command, so not published with them: eryx can't mount it yet.
-      - if: matrix.cli == 'go'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: go-root
-          path: scratch/go-component/goroot.tar.gz
-          if-no-files-found: error
-          retention-days: 14
 
   # Publish what this run built to a throwaway registry on the runner, and read
   # it back: everything a real publish does except the destination.

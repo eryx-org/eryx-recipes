@@ -28,7 +28,7 @@ Go itself is four commands, built from the fork's own tree (eryx-build's `std_to
 - After `mise run build-cli -- go`, `scripts/go-root.sh` writes `goroot.tar.gz` into its component dir. That's the GOROOT go needs (`go/`: the fork's standard library source and `go.env`) and a prebuilt standard library cache (`gocache/`). Mount them, and set `GOROOT` and `GOCACHE` to them.
 - Modules must be vendored: go.env sets `GOPROXY=off`.
 - Don't set `GOFLAGS` in the sandbox. It replaces go.env's `-mod=vendor -trimpath -p=1` rather than adding to it, and without `-trimpath` the prebuilt cache never matches, so every build recompiles the standard library.
-- CI uploads the archive as the `go-root` artifact. It isn't published yet, because eryx can't mount it yet.
+- The archive isn't published or uploaded yet, because eryx can't mount it yet. CI builds it to smoke-test go, and caches it with go's component.
 
 ## Publishing
 
