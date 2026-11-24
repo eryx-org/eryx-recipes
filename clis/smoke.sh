@@ -148,9 +148,9 @@ diffutils)
     expect "$(dw diff -u /data/a/f /data/b/f || true)" "+APPLE"
     expect_status 0 dw diff /data/fruit.txt /data/a/f
     expect_status 1 dw diff /data/a/f /data/b/f
-    # Trouble is 2 natively, but the Rust lane reports any failure as 1: it
-    # doesn't have the C lane's exit-with-code shim yet.
-    expect_status 1 dw diff /data/a/f /data/missing
+    # Trouble is 2: the Rust lane passes on the ExitCode main returns
+    # (eryx-org/eryx#1136).
+    expect_status 2 dw diff /data/a/f /data/missing
     # stdin as one side
     expect "$(printf 'banana\n' | dw diff - /data/a/f || true)" "> apple"
     # -r, and bundled options (our patch)
