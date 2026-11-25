@@ -180,8 +180,8 @@ def sbom_document(name, packages, created=None):
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": name,
-        "documentNamespace": f"https://github.com/eryx-org/eryx-commands/spdx/{name}-{digest}",
-        "creationInfo": {"created": created, "creators": ["Tool: eryx-commands scripts/notices.py"]},
+        "documentNamespace": f"https://github.com/eryx-org/eryx-recipes/spdx/{name}-{digest}",
+        "creationInfo": {"created": created, "creators": ["Tool: eryx-recipes scripts/notices.py"]},
         "packages": packages,
         "relationships": [
             {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-0"},
