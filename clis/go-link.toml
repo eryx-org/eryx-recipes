@@ -15,14 +15,22 @@ lang = "go"
 [source]
 # The fork at the commit the Go lane builds with: std_tool builds need both.
 repo = "https://github.com/sd2k/go.git"
-ref = "wasip3-0.3.0-go1.27.4-exit-code"
-commit = "331bf58bd2672eda182895f30fd2c688721deba7"
+ref = "wasip3-0.3.0-go1.27.4-branches-notetsleepg"
+commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
 dir = "scratch/go-src"
 
 [build]
 package = "cmd/link"
 std_tool = true
 vendor_patch = "clis/patches/patch-go.sh"
+
+[build.go_toolchain]
+# The wasip3 Go fork to build with, overriding eryx-build's default pin
+# (GoToolchain::default) until the next vars.eryx_rev bump picks it up. Must
+# match scripts/bootstrap-go-wasip3.sh, which CI builds the toolchain with.
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-branches-notetsleepg"
+commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
 
 [cwasm]
 # Loaded as a plain component; the host compiles it on demand.
