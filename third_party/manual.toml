@@ -177,6 +177,18 @@ cli_dep = "mbedtls"
 cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
 
 [[component]]
+name = "Grafana CLI (gcx)"
+version = "1.9.0 (7893f846)"
+license = "Apache-2.0"
+url = "https://github.com/grafana/gcx/tree/7893f846f459408daa347b8ab4d12c30324387c5"
+# Its Go modules are listed from its vendor tree (scripts/notices.py,
+# go_section).
+files = ["third_party/licenses/gcx-LICENSE"]
+artifacts = ["gcx"]
+cli = "clis/gcx.toml"
+cli_commit = "7893f846f459408daa347b8ab4d12c30324387c5"
+
+[[component]]
 name = "GitHub CLI"
 version = "2.87.3 (cf862d65)"
 license = "MIT"
@@ -398,4 +410,4 @@ url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
 # also cover go and its tools, built from the same fork.
 files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
 go_fork_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-artifacts = ["gh", "go", "go-compile", "go-asm", "go-link"]
+artifacts = ["gcx", "gh", "go", "go-compile", "go-asm", "go-link"]
