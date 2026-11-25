@@ -27,52 +27,75 @@
 # - `pins` (optional): mise.toml pins its build uses that its lane doesn't,
 #   as `<table>.<key>` (`["vars.wasi_sdk_version"]` for a Rust command that
 #   compiles C). They count as build inputs, like the lane's.
+# - `files` (optional): repo files its build uses that its recipe doesn't
+#   name, such as a script writing something beside the component. They count
+#   as build inputs too.
 
 # The same build as eryx's embedded coreutils, from eryx's recipe
 # (eryx-commands#7).
 [eryx.coreutils]
-version = "0.9.0-r.3"
+version = "0.9.0-r.4"
 multicall = true
 fetched = "coreutils_rev"
 
 [eryx.awk]
-version = "20261106.0.0-r.2"
+version = "20261106.0.0-r.3"
 upstream = "20261106.0.0"
 
 [eryx.curl]
-version = "8.20.0-r.3"
+version = "8.20.0-r.4"
 
 [eryx.find]
-version = "0.11.0-r.3"
+version = "0.11.0-r.4"
 # Its onig crate compiles Oniguruma's C with the WASI SDK's clang.
 pins = ["vars.wasi_sdk_version"]
 
 [eryx.diffutils]
-version = "0.6.0-r.1"
+version = "0.6.0-r.2"
 # main after 0.6.0 (clis/diffutils.toml), so not readable from source.ref
 upstream = "0.6.0"
 names = ["diff", "cmp"]
 
 [eryx.gh]
-version = "2.87.3-r.5"
+version = "2.87.3-r.6"
 
 [eryx.jaq]
-version = "3.1.2-r.3"
+version = "3.1.2-r.4"
 
 [eryx.jq]
-version = "1.8.2-r.3"
+version = "1.8.2-r.4"
 
 [eryx.rg]
-version = "15.1.0-r.3"
+version = "15.1.0-r.4"
 
 [eryx.sd]
-version = "1.1.0-r.3"
+version = "1.1.0-r.4"
 
 [eryx.sed]
-version = "0.3.0-r.2"
+version = "0.3.0-r.3"
 
 [eryx.sqlite3]
-version = "3.53.2-r.3"
+version = "3.53.2-r.4"
 
 [eryx-gpl.git]
-version = "2.56.1-r.3"
+version = "2.56.1-r.4"
+
+# Go's own commands, from the wasip3 Go fork (clis/go.toml): go runs the
+# other three through eryx:process/run.
+[eryx.go]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+# It writes the GOROOT go runs with, goroot.tar.gz, beside the component.
+files = ["scripts/go-root.sh"]
+
+[eryx.go-compile]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+
+[eryx.go-asm]
+version = "1.27.4-r.1"
+upstream = "1.27.4"
+
+[eryx.go-link]
+version = "1.27.4-r.1"
+upstream = "1.27.4"

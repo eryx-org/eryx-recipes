@@ -49,8 +49,10 @@ wasi_sdk_version = "wasi-sdk-33"
 # at least eryx-org/eryx#1004, whose provenance.json records the eryx-build
 # version and the WIT imports the registry annotations come from, and
 # eryx-org/eryx#1106, whose exit-code shim lets C commands exit with statuses
-# above 1 (the smoke tests check them).
-eryx_rev = "1f04d02e674b5010ce7f8408a7300befeef77819"
+# above 1 (the smoke tests check them), and eryx-org/eryx#1190, whose
+# `std_tool` and Go-lane `[build] wit` build Go's own commands (go and its
+# tools).
+eryx_rev = "2a64970cc3da33b63e662de4d110c7b142f8d1f7"
 # The eryx commit coreutils' recipe (clis/coreutils.toml and its uucore patch)
 # is fetched from: eryx keeps building it for its embedded coreutils, and we
 # publish the same build. `mise run bump-coreutils` moves it.

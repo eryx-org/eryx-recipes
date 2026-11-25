@@ -1,0 +1,32 @@
+# Build manifest for Go's `compile` tool, as the command `go-compile`, from the
+# wasip3 Go fork itself (eryx-build's `std_tool`), via the Go lane. Built by
+# `mise run build-cli -- go-compile`.
+#
+# `go` (clis/go.toml) runs it through eryx:process/run under this name;
+# go-wasip3.patch makes its `-V` output say `compile`, as go expects. It
+# builds from the same patched checkout as `go`.
+
+name = "go-compile"
+description = "Go's compile tool, which go runs (wasip3 Go fork)"
+# SPDX expression for the upstream source, recorded in provenance.json.
+license = "BSD-3-Clause"
+lang = "go"
+
+[source]
+# The fork at the commit the Go lane builds with: std_tool builds need both.
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-exit-code"
+commit = "331bf58bd2672eda182895f30fd2c688721deba7"
+dir = "scratch/go-src"
+
+[build]
+package = "cmd/compile"
+std_tool = true
+vendor_patch = "clis/patches/patch-go.sh"
+
+[cwasm]
+# Loaded as a plain component; the host compiles it on demand.
+enabled = false
+
+[output]
+dir = "scratch/go-compile-component"

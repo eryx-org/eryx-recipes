@@ -148,9 +148,9 @@ diffutils)
     expect "$(dw diff -u /data/a/f /data/b/f || true)" "+APPLE"
     expect_status 0 dw diff /data/fruit.txt /data/a/f
     expect_status 1 dw diff /data/a/f /data/b/f
-    # Trouble is 2 natively, but the Rust lane reports any failure as 1: it
-    # doesn't have the C lane's exit-with-code shim yet.
-    expect_status 1 dw diff /data/a/f /data/missing
+    # Trouble is 2: the Rust lane passes on the ExitCode main returns
+    # (eryx-org/eryx#1136).
+    expect_status 2 dw diff /data/a/f /data/missing
     # stdin as one side
     expect "$(printf 'banana\n' | dw diff - /data/a/f || true)" "> apple"
     # -r, and bundled options (our patch)
@@ -223,6 +223,40 @@ gh)
     status=0
     ghw "$OUT/component.wasm" issue list -R cli/cli > /dev/null || status=$?
     [ "$status" = 4 ] || { echo "::error::$NAME: expected exit status 4 with no token, got $status"; exit 1; }
+    ;;
+go)
+    # go runs its tools through eryx:process/run, which only eryx provides,
+    # so builds only run inside eryx: stub it with a trap, and check what
+    # needs no tools, with the GOROOT and stdlib cache it ships with.
+    tar -xzf "$OUT/goroot.tar.gz" -C "$WORK"
+    gow() {
+        wasmtime run -S p3 -W component-model-async -W component-model-more-async-builtins \
+            -W max-wasm-stack=8388608 -W unknown-imports-trap \
+            --dir "$WORK/go::/go" --dir "$WORK/gocache::/gocache" --dir "$WORK/data::/data" \
+            --env GOROOT=/go --env GOCACHE=/gocache --env HOME=/data "$OUT/component.wasm" "$@" 2>&1
+    }
+    expect "$(gow version)" "go version go1.27.4 wasip3/wasm32"
+    expect "$(gow env GOOS GOARCH GOFLAGS | tr '\n' ' ')" "wasip3 wasm32 -mod=vendor -trimpath -p=1"
+    expect "$(gow list std)" "net/http"
+    # No telemetry: it would start an upload process.
+    out="$(gow env GOVERSION)"
+    if grep -q telemetry <<< "$out"; then echo "::error::go: telemetry output: $out"; exit 1; fi
+    expect "$(wasm-tools component wit "$OUT/component.wasm")" "import eryx:process/run@0.1.0;"
+    ;;
+go-compile|go-asm|go-link)
+    # go identifies its tools by their -V=full line, which must name them
+    # without the go- prefix they're registered under.
+    tool="${NAME#go-}"
+    toolw() {
+        wasmtime run -S p3 -W component-model-async -W component-model-more-async-builtins \
+            -W max-wasm-stack=8388608 --dir "$WORK/data::/data" --argv0 "$NAME" "$OUT/component.wasm" "$@" 2>&1
+    }
+    expect "$(toolw -V=full)" "$tool version go1.27.4"
+    if [ "$NAME" = go-compile ]; then
+        printf 'package main\n\nfunc main() { println("hi") }\n' > "$WORK/data/main.go"
+        toolw -p main -o /data/main.a -pack /data/main.go
+        [ -s "$WORK/data/main.a" ] || { echo "::error::go-compile: no /data/main.a"; exit 1; }
+    fi
     ;;
 git)
     # git imports eryx:process/run and pipe, for the subcommands and remote

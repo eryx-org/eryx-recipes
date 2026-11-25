@@ -456,19 +456,19 @@ def escape_module(module):
     return re.sub(r"[A-Z]", lambda m: "!" + m[0].lower(), module)
 
 
-def mpl_changes(checkout, module, version, env):
-    """The files of vendor/<module> that differ from, or aren't in, the
+def mpl_changes(checkout, vendor, module, version, env):
+    """The files of <vendor>/<module> that differ from, or aren't in, the
     module as published (the module cache's copy, which `go mod vendor`
     fetched and verified against go.sum)."""
     cache = Path(run(["go", "env", "GOMODCACHE"], cwd=checkout, env=env).strip()) / f"{escape_module(module)}@{version}"
     if not cache.is_dir():
         sys.exit(f"{module}@{version} isn't in the module cache ({cache}); rebuild the command")
-    vendored = checkout / "vendor" / module
+    vendored = vendor / module
     # Modules vendored inside this one's directory (a/b and a/b/v2) are
     # their own, so their files aren't compared with this one's.
     nested = [
         line.split()[1][len(module) + 1:] + "/"
-        for line in (checkout / "vendor" / "modules.txt").read_text().splitlines()
+        for line in (vendor / "modules.txt").read_text().splitlines()
         if line.startswith(f"# {module}/")
     ]
     changed = []
@@ -480,6 +480,35 @@ def mpl_changes(checkout, module, version, env):
         if not original.is_file() or original.read_bytes() != f.read_bytes():
             changed.append(rel)
     return changed
+
+
+def vendored_modules(vendor):
+    """`vendor/modules.txt`'s packages, each with its (module, version)."""
+    owner, module = {}, None
+    for line in (vendor / "modules.txt").read_text().splitlines():
+        if line.startswith("# "):
+            fields = line.split()
+            module = (fields[1], fields[2])
+        elif line and not line.startswith("#"):
+            owner[line] = module
+    return owner
+
+
+def std_tool_modules(checkout, package, env):
+    """The modules a `std_tool` build (one of Go's own commands, built with
+    the fork's checkout as its GOROOT) links, each with the vendor dir it's
+    in. `go list` gives GOROOT packages no module, but the standard library's
+    and cmd's vendored packages are named vendor/<package> and
+    cmd/vendor/<package>, and their modules.txt say whose they are."""
+    src = checkout / "src"
+    listed = run(["go", "list", "-deps", "-f", "{{.ImportPath}}", package], cwd=src, env=env).split()
+    found = {}
+    for prefix, vendor in [("vendor/", src / "vendor"), ("cmd/vendor/", src / "cmd" / "vendor")]:
+        owner = vendored_modules(vendor)
+        for pkg in listed:
+            if pkg.startswith(prefix):
+                found[owner[pkg[len(prefix):]]] = vendor
+    return found
 
 
 def go_section(name, path, sbom=None):
@@ -494,11 +523,15 @@ def go_section(name, path, sbom=None):
     LICENSE and reports that (in-toto/attestation, Apache-2.0, came out as
     gh's MIT). They're classified with identify_license instead, with
     licence headers matched too: several modules ship only Apache-2.0's
-    header as their LICENSE.
+    header as their LICENSE. A `std_tool` command's modules are vendored in
+    the fork's src/vendor and src/cmd/vendor instead (std_tool_modules).
     """
     m = manifest(name)
     checkout = ROOT / m["source"]["dir"]
-    if not (checkout / "vendor" / "modules.txt").is_file():
+    std_tool = m["build"].get("std_tool", False)
+    # A std_tool checkout gets the toolchain's pkg/tool when it's built.
+    built = checkout / "pkg" / "tool" if std_tool else checkout / "vendor" / "modules.txt"
+    if not built.exists():
         sys.exit(f"{name}: {checkout} isn't built; run `mise run build-cli -- {name}` first")
     goroot = Path(os.environ.get("ERYX_GO_WASIP3_ROOT", ROOT / "scratch" / "go-wasip3"))
     classifier = ROOT / "scratch" / "tools" / "bin" / "identify_license"
@@ -512,19 +545,24 @@ def go_section(name, path, sbom=None):
     }
     package = m["build"]["package"]
     # The modules whose packages are linked: not everything in go.sum.
-    listed = run(
-        ["go", "list", "-deps", "-f", "{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}}{{end}}{{end}}", package],
-        cwd=checkout, env=env,
-    )
-    modules = sorted({tuple(line.split()) for line in listed.splitlines() if line.strip()})
+    if std_tool:
+        env["GOROOT"] = str(checkout)
+        vendors = std_tool_modules(checkout, package, env)
+    else:
+        listed = run(
+            ["go", "list", "-deps", "-f", "{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}}{{end}}{{end}}", package],
+            cwd=checkout, env=env,
+        )
+        vendors = {tuple(line.split()): checkout / "vendor" for line in listed.splitlines() if line.strip()}
+    modules = sorted(vendors)
     # A licence for a module's documentation (opencontainers/go-digest's
     # LICENSE.docs, CC-BY-SA-4.0) doesn't cover the code that's linked.
     files = {
         module: sorted(
-            f for f in (checkout / "vendor" / module).iterdir()
+            f for f in (vendors[module, version] / module).iterdir()
             if f.is_file() and LICENCE_FILE.match(f.name) and "doc" not in f.name.lower()
         )
-        for module, _ in modules
+        for module, version in modules
     }
     with tempfile.TemporaryDirectory() as tmp:
         report = Path(tmp) / "licences.json"
@@ -540,7 +578,7 @@ def go_section(name, path, sbom=None):
     for module, version in modules:
         names = sorted(set().union(*(found.get(f.resolve(), found.get(f, set())) for f in files[module])) if files[module] else set())
         if not names:
-            print(f"error: {name}: no licence found for {module} {version} in vendor/{module}", file=sys.stderr)
+            print(f"error: {name}: no licence found for {module} {version} in {vendors[module, version] / module}", file=sys.stderr)
             ok = False
             continue
         if bad := [n for n in names if n not in accepted]:
@@ -552,7 +590,7 @@ def go_section(name, path, sbom=None):
             # Accepted for unmodified dependencies only (about.toml): check
             # the vendored copy is the published module, and point at its
             # source, as MPL-2.0 asks.
-            if changed := mpl_changes(checkout, module, version, env):
+            if changed := mpl_changes(checkout, vendors[module, version], module, version, env):
                 print(f"error: {name}: {module} {version} is MPL-2.0, which is only accepted unmodified, "
                       f"but the recipe changed {', '.join(changed)}", file=sys.stderr)
                 ok = False

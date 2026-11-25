@@ -3,7 +3,8 @@
 #
 # Which lanes run when:
 # - Rust (rg, sd, jaq, sed, find, diffutils, and coreutils from eryx's
-#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gh): when the build pins
+#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gh, and go with its
+#   tools go-compile, go-asm and go-link): when the build pins
 #   (mise.toml), this workflow, smoke.sh, what the notices are made from, or
 #   one of the lane's manifests, patches, shims or WIT change.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
@@ -159,6 +160,14 @@ jobs:
               - 'clis/patches/patch-gh-vendor.sh'
               - 'clis/patches/gh-*.patch'
               - 'scripts/bootstrap-go-wasip3.sh'
+              - 'clis/go.toml'
+              - 'clis/go-*.toml'
+              - 'clis/patches/patch-go.sh'
+              - 'clis/patches/go-wasip3.patch'
+              # The GOROOT go ships with (goroot.tar.gz).
+              - 'scripts/go-root.sh'
+              # go's eryx:process/run binding imports its world.
+              - 'wit/**'
 
   check:
     name: Check manifests
@@ -384,10 +393,16 @@ jobs:
           retention-days: 14
 
   go:
-    name: Build gh (Go lane)
+    name: Build ${{ matrix.cli }} (Go lane)
     needs: changes
     if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true') }}
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # go, go-compile, go-asm and go-link each build from their own
+        # checkout of the fork (eryx-build's std_tool).
+        cli: [gh, go, go-compile, go-asm, go-link]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -401,7 +416,7 @@ jobs:
       - name: Hash the build inputs
         id: key
         env:
-          CLI: gh
+          CLI: ${{ matrix.cli }}
         run: |
           hash=$(python3 scripts/publish.py cache-key "$CLI")
           echo "key=component-v1-$CLI-$hash" >> "$GITHUB_OUTPUT"
@@ -412,7 +427,7 @@ jobs:
         if: github.event_name == 'push' || github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: scratch/gh-component
+          path: scratch/${{ matrix.cli }}-component
           key: ${{ steps.key.outputs.key }}
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: ./.github/actions/eryx-build
@@ -447,14 +462,26 @@ jobs:
           path: scratch/go-wasip3
           key: ${{ steps.go-wasip3-cache.outputs.cache-primary-key }}
       - if: steps.cache.outputs.cache-hit != 'true'
-        run: mise run build-cli -- gh
-      - run: clis/smoke.sh gh
+        env:
+          CLI: ${{ matrix.cli }}
+        run: mise run build-cli -- "$CLI"
+      # The GOROOT go runs with, from the checkout go was just built from.
+      # It's in the component dir, so cached with it, and the smoke test
+      # uses it.
+      - name: Write go's GOROOT
+        if: matrix.cli == 'go' && steps.cache.outputs.cache-hit != 'true'
+        run: scripts/go-root.sh scratch/go-component
+      - env:
+          CLI: ${{ matrix.cli }}
+        run: clis/smoke.sh "$CLI"
       # Its Go modules' licences, and the Go standard library's.
       - name: Write the notices
         if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          CLI: ${{ matrix.cli }}
         run: |
           mise run install-license-classifier
-          mise run notices -- scratch/gh-component gh
+          mise run notices -- "scratch/$CLI-component" "$CLI"
       # Saved from PRs too: a PR's caches are scoped to it (only main's are
       # seen by other branches), and only people with write access can run
       # CI here (the repo is private, so there are no fork PRs). Only after
@@ -463,18 +490,18 @@ jobs:
         if: steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: scratch/gh-component
+          path: scratch/${{ matrix.cli }}-component
           key: ${{ steps.key.outputs.key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: gh-component
+          name: ${{ matrix.cli }}-component
           path: |
-            scratch/gh-component/component.wasm
-            scratch/gh-component/*.cwasm
-            scratch/gh-component/manifest.toml
-            scratch/gh-component/provenance.json
-            scratch/gh-component/gh.notices.md
-            scratch/gh-component/gh.spdx.json
+            scratch/${{ matrix.cli }}-component/component.wasm
+            scratch/${{ matrix.cli }}-component/*.cwasm
+            scratch/${{ matrix.cli }}-component/manifest.toml
+            scratch/${{ matrix.cli }}-component/provenance.json
+            scratch/${{ matrix.cli }}-component/${{ matrix.cli }}.notices.md
+            scratch/${{ matrix.cli }}-component/${{ matrix.cli }}.spdx.json
           if-no-files-found: error
           retention-days: 14
 
