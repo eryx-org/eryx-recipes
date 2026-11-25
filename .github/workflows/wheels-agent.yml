@@ -1,19 +1,28 @@
 name: Wheels agent
 
-# Labelling a `native-package` issue (opened by builders when an environment
-# waits for a package with native code) `build-native` has Claude write a
-# recipe for it in wheels/, build and test it here, and open a PR. The PR is
-# reviewed like any other, and its recipe published only once it's merged
-# (wheels.yml), so nothing it writes reaches environments unreviewed. The
-# issues are opened here by eryx-run's builders (ERYX_GITHUB_ISSUES_REPO).
+# Labelling a `native-package` issue (opened by eryx-run's builders when an
+# environment waits for a package with native code) `build-native` has Claude
+# write a recipe for it in wheels/ and build and test it, then opens a draft
+# PR with it. The PR is reviewed like any other, and its recipe published
+# only once it's merged (wheels.yml), so nothing it writes reaches
+# environments unreviewed.
 #
-# The sdist's build code is untrusted: the agent builds and verifies only
-# with `build.py --sandbox`, a container with none of this job's tokens.
+# The agent reads the package's source, which anyone can publish, so it's
+# given nothing worth taking but its Anthropic key, and no way to send that
+# anywhere:
 #
-# Needs the Claude GitHub App installed (so the PR it opens runs CI; a PR
-# opened with GITHUB_TOKEN doesn't) and either workload identity federation
-# (the ANTHROPIC_FEDERATION_RULE_ID and ANTHROPIC_ORGANIZATION_ID variables)
-# or an ANTHROPIC_API_KEY secret.
+# - `recipe` runs it with a read-only token it never sees (the claude CLI,
+#   not claude-code-action, so no GitHub token is handed to it) and no
+#   id-token. Its tools are reading, editing only wheels/<package>/, fetching
+#   from PyPI and GitHub, and `wheels/build.py unpack|build|verify`. build.py
+#   refuses to build or verify outside its sandbox (WHEELS_REQUIRE_SANDBOX, a
+#   container with none of this job's environment) or to write into the
+#   checkout.
+# - `pull-request` takes only wheels/<package>/ from it, and opens the PR (or
+#   comments on the issue) with GITHUB_TOKEN. No agent or package code runs
+#   there.
+#
+# Needs an ANTHROPIC_API_KEY secret.
 on:
   issues:
     types: [labeled]
@@ -21,6 +30,9 @@ on:
 concurrency:
   group: wheels-agent-${{ github.event.issue.number }}
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   recipe:
@@ -31,63 +43,160 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
+      contents: read
+    outputs:
+      package: ${{ steps.issue.outputs.package }}
+      version: ${{ steps.issue.outputs.version }}
     steps:
-      # No token left in .git/config for the sdist's build code to find
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # What the builders title it: "Build <name>==<version> for WebAssembly",
+      # with a normalized PyPI name. Anything else stops here, as the name
+      # becomes the one directory the agent may write
+      - id: issue
+        env:
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          if [[ ! "$TITLE" =~ ^Build\ ([a-z0-9]([a-z0-9-]*[a-z0-9])?)==([0-9A-Za-z.!+_-]+)\ for\ WebAssembly$ ]]; then
+            echo "::error::Not a builders' issue title: $TITLE"
+            exit 1
+          fi
+          package=${BASH_REMATCH[1]} version=${BASH_REMATCH[3]}
+          if [ -e "wheels/$package" ]; then
+            echo "::error::wheels/$package already exists"
+            exit 1
+          fi
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - id: toolchain
         uses: ./.github/actions/wheels-toolchain
 
-      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1.0.290
+      - name: Install Claude Code
+        run: npm install --no-fund --no-audit --prefix "$RUNNER_TEMP/claude" @anthropic-ai/claude-code@2.1.332
+
+      - name: Write the recipe
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WHEELS_REQUIRE_SANDBOX: "1"
           WASI_SDK_PATH: ${{ steps.toolchain.outputs.wasi-sdk }}
           SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
-          # From the issue, so passed as data rather than in the prompt
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PACKAGE: ${{ steps.issue.outputs.package }}
+          VERSION: ${{ steps.issue.outputs.version }}
+        run: |
+          prompt=$(cat <<EOF
+          The package $PACKAGE $VERSION on PyPI has native code, and eryx-run's
+          environments need a WebAssembly (WASI) build of it. Write a recipe for it in
+          wheels/$PACKAGE/.
+
+          1. Read wheels/README.md, and the existing recipes in wheels/*/, which
+             show C (setuptools), meson, CMake and Rust (maturin) builds.
+          2. Find its sdist on PyPI (https://pypi.org/pypi/$PACKAGE/$VERSION/json)
+             and write wheels/$PACKAGE/recipe.toml. To read its source, unpack it
+             into a new directory under /tmp:
+               python3 wheels/build.py unpack wheels/$PACKAGE --out /tmp/src-<n>
+             (a wrong sha256 in the recipe fails, printing the real one). Look at
+             how Pyodide (pyodide/pyodide, packages/$PACKAGE/meta.yaml) and
+             dicej/wasi-wheels build it for hints; WASI isn't Emscripten, but their
+             patches show where the trouble is. Then write test.py, and build.sh
+             or patches if the default \`pip wheel\` build isn't enough.
+          3. Build and test it until both pass. Builds and tests run in a sandbox
+             (an ubuntu:26.04 container with build-essential, so a build.sh
+             installs anything else, such as rustup, itself):
+               python3 wheels/build.py build wheels/$PACKAGE --sysroot "$SYSROOT" --out /tmp/wheels-<n> --sandbox
+               python3 wheels/build.py verify /tmp/wheels-<n>/<wheel> wheels/$PACKAGE --sandbox
+             test.py must exercise the native code, not a pure-Python fallback.
+          4. Write wheels/$PACKAGE/PR.md: a PR description saying how it's built,
+             what was patched and why, and what doesn't work.
+
+          If it can't be done (for example it needs threads or processes in a way
+          that can't be patched out), write wheels/$PACKAGE/CANNOT.md instead,
+          saying why, with what you tried. You can only write in wheels/$PACKAGE/,
+          and only run wheels/build.py; the PR or comment is made from what you
+          leave there.
+          EOF
+          )
+          "$RUNNER_TEMP/claude/node_modules/.bin/claude" -p "$prompt" \
+            --model claude-opus-5-5 --max-turns 300 \
+            --setting-sources project --strict-mcp-config --permission-mode dontAsk \
+            --allowedTools Read Glob Grep \
+              "Edit(wheels/$PACKAGE/**)" "Write(wheels/$PACKAGE/**)" \
+              "Bash(python3 wheels/build.py unpack:*)" \
+              "Bash(python3 wheels/build.py build:*)" \
+              "Bash(python3 wheels/build.py verify:*)" \
+              "WebFetch(domain:pypi.org)" "WebFetch(domain:github.com)" \
+              "WebFetch(domain:raw.githubusercontent.com)"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-          anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: >-
-            --model claude-opus-5-5
-            --max-turns 300
-            --allowedTools Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch
-          prompt: |
-            Issue #${{ github.event.issue.number }} in this repository (its title is in
-            $ISSUE_TITLE) asks for a WebAssembly (WASI) build of a Python package with
-            native code, for eryx-run's environments. Write a recipe for it.
+          name: recipe
+          path: wheels/${{ steps.issue.outputs.package }}/
+          if-no-files-found: error
 
-            1. Read wheels/README.md, and the existing recipes in wheels/*/, which
-               show C (setuptools), and possibly meson, CMake and Rust (maturin) builds.
-            2. Find the package's sdist on PyPI for the version in the title
-               (https://pypi.org/pypi/<package>/<version>/json) and write
-               wheels/<package>/recipe.toml, test.py, and build.sh or patches if the
-               default `pip wheel` build isn't enough. Look at how Pyodide
-               (pyodide/pyodide, packages/<package>/meta.yaml) and dicej/wasi-wheels
-               build it for hints; WASI isn't Emscripten, but the patches show where
-               the trouble is.
-            3. Build and test it, until both pass, always with --sandbox (the sdist's
-               build code is untrusted, and the sandbox keeps it away from this job's
-               credentials; it's an ubuntu:26.04 container with build-essential, so
-               install anything else, such as rustup, in build.sh):
-                 python3 wheels/build.py build wheels/<package> --sysroot "$SYSROOT" --out /tmp/wheels --sandbox
-                 python3 wheels/build.py verify /tmp/wheels/<wheel> wheels/<package> --sandbox
-               Never run the package's own build code (setup.py, build scripts, its
-               tests) outside the sandbox. test.py must exercise the native code, not a
-               pure-Python fallback.
-            4. Commit only wheels/<package>/ on a new branch named
-               wheels/<package>-<version>, push it, and open a draft PR against main
-               titled "feat(wheels): build <package> <version> for WebAssembly", whose
-               body says how it's built, what was patched and why, and what doesn't
-               work, and ends with "Closes #$ISSUE_NUMBER".
+  pull-request:
+    needs: recipe
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      # To run wheels.yml on the PR's branch: a push with GITHUB_TOKEN runs
+      # no workflows
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PACKAGE: ${{ needs.recipe.outputs.package }}
+      VERSION: ${{ needs.recipe.outputs.version }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-            If it can't be done (for example it needs threads or processes in a way
-            that can't be patched out), don't open a PR: comment on the issue saying
-            why, with what you tried. Never change anything outside wheels/<package>/.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: recipe
+          path: ${{ runner.temp }}/recipe
+
+      # Only regular files, at most 1 MB in all, go into wheels/<package>/
+      - name: Check what the agent left
+        run: |
+          cd "$RUNNER_TEMP/recipe"
+          if find . ! -type f ! -type d | grep -q .; then
+            echo "::error::The recipe has something other than files and directories"
+            exit 1
+          fi
+          size=$(du -sb . | cut -f1)
+          if [ "$size" -gt 1048576 ]; then
+            echo "::error::The recipe is $size bytes"
+            exit 1
+          fi
+
+      - name: Open the PR, or say why not
+        run: |
+          if [ -f "$RUNNER_TEMP/recipe/CANNOT.md" ]; then
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/recipe/CANNOT.md"
+            exit 0
+          fi
+          branch="wheels/$PACKAGE-$VERSION"
+          body="$RUNNER_TEMP/pr.md"
+          if [ -f "$RUNNER_TEMP/recipe/PR.md" ]; then
+            mv "$RUNNER_TEMP/recipe/PR.md" "$body"
+          else
+            echo "The agent left no description." > "$body"
+          fi
+          printf '\n\nCloses #%s\n\nWritten by Claude (wheels-agent.yml).\n' "$ISSUE" >> "$body"
+          mkdir -p "wheels/$PACKAGE"
+          cp -R "$RUNNER_TEMP/recipe/." "wheels/$PACKAGE/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git
+          git switch -c "$branch"
+          git add "wheels/$PACKAGE"
+          git commit -q -m "feat(wheels): build $PACKAGE $VERSION for WebAssembly"
+          git push -u origin "$branch"
+          gh pr create --draft --base main --head "$branch" \
+            --title "feat(wheels): build $PACKAGE $VERSION for WebAssembly" --body-file "$body"
+          gh workflow run wheels.yml --ref "$branch"

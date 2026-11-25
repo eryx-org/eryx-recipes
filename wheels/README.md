@@ -92,7 +92,9 @@ wheels/build.py verify /tmp/wheels/markupsafe-*.whl wheels/markupsafe
 ```
 
 `verify` uses `scratch/tools/bin/eryx-precompile` (`--precompile` picks
-another).
+another). `wheels/build.py unpack wheels/markupsafe --out /tmp/src` unpacks a
+recipe's sdist to read, checked against its hash and as data only, without
+running any of it.
 Add `--sandbox` to `build` or `verify` to run it in a throwaway Docker
 container (`ubuntu:26.04` with `build-essential`) that has only the recipes,
 the toolchain and the output mounted: for building packages you haven't
@@ -107,10 +109,27 @@ waits (`status: waiting`), and the builder counts a request for it in
 `native-package` here (eryx-run's `ERYX_GITHUB_ISSUES_REPO`, with
 `ERYX_GITHUB_ISSUES_TOKEN`, a token that can write issues here; one issue
 per package version, shared by every deployment). Labelling the issue
-`build-native` runs `.github/workflows/wheels-agent.yml`:
-Claude writes the recipe, builds and tests it, and opens a draft PR, or says
-on the issue why it can't. Once a build is published, builders queue every
-environment waiting for it.
+`build-native` runs `.github/workflows/wheels-agent.yml`: Claude writes the
+recipe, builds and tests it, and a draft PR is opened with it, or a comment
+says on the issue why it can't be built. Once a build is published, builders
+queue every environment waiting for it.
+
+The agent reads the package's source, which anyone can publish to PyPI and
+then ask for, so it's treated as hostile:
+
+- The agent's job has a read-only token, which it never sees (it runs the
+  `claude` CLI, not claude-code-action), and no `id-token`. Its tools are
+  reading, editing only `wheels/<package>/` (the name parsed from the
+  issue's title), fetching from PyPI and GitHub, and `build.py unpack`,
+  `build` and `verify`.
+- `WHEELS_REQUIRE_SANDBOX` makes `build.py` refuse to build or verify
+  without `--sandbox`, and `unpack` and the sandbox's output refuse a
+  directory overlapping the checkout, so the package's code can't reach
+  `build.py`.
+- A second job, with no agent and nothing of the package's running, takes
+  only `wheels/<package>/` (regular files, at most 1 MB), pushes it to a
+  branch and opens the PR with `GITHUB_TOKEN`, then runs `wheels.yml` on
+  the branch, as pushes with that token trigger nothing.
 
 ## Publishing
 

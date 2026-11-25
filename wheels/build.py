@@ -3,6 +3,7 @@
 
     wheels/build.py build RECIPE --sysroot DIR --out DIR [--sandbox]
     wheels/build.py verify WHEEL RECIPE --precompile PATH [--sandbox]
+    wheels/build.py unpack RECIPE --out DIR
     wheels/build.py publish WHEEL... --bucket NAME --endpoint URL
 
 `build` downloads the recipe's sdist (checked against its hash) into a new
@@ -160,6 +161,49 @@ def fixed_path(name, target):
     return link
 
 
+def fetch(spec, work):
+    """Download the recipe's sdist into `work` (a new directory), check it
+    against the recipe's hash and unpack it into `work/src`, as data: no
+    links out, special files or absolute paths, and none of its code runs.
+    Returns its top directory and its newest file's mtime"""
+    archive = work / spec["sdist"].rsplit("/", 1)[-1]
+    with urllib.request.urlopen(spec["sdist"]) as response:
+        archive.write_bytes(response.read())
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != spec["sha256"]:
+        sys.exit(f"{archive.name} has sha256 {digest}, not the recipe's {spec['sha256']}")
+    src = work / "src"
+    src.mkdir()
+    with tarfile.open(archive) as tar:
+        # Backends stamp the files they generate with SOURCE_DATE_EPOCH, if
+        # set, rather than the time of the build: the sdist's newest file's
+        epoch = str(int(max(member.mtime for member in tar.getmembers())))
+        tar.extractall(src, filter="data")
+    (top,) = src.iterdir()
+    return top, epoch
+
+
+def unpack(args):
+    """Unpack a recipe's sdist into OUT/src to read, without building it"""
+    _, spec = load(args.recipe)
+    out = outside_repo(args.out)
+    if out.exists():
+        sys.exit(f"{out} exists: unpack makes a new directory, so nothing is overwritten")
+    out.mkdir(parents=True)
+    top, _ = fetch(spec, out)
+    print(f"Unpacked {spec['sdist']} into {top}")
+
+
+def outside_repo(path):
+    """`path`, resolved, if it and this checkout don't overlap: what an
+    sdist's files or build code can write to mustn't be able to reach
+    build.py or anything else here"""
+    path = Path(path).resolve()
+    if path == REPO or REPO in path.parents or path in REPO.parents:
+        sys.exit(f"{path} overlaps {REPO}: choose a directory outside it, such as /tmp/wheels")
+    return path
+
+
 def build(args):
     recipe, spec = load(args.recipe)
     # The toolchain is reached through fixed paths too, so a build on another
@@ -176,22 +220,7 @@ def build(args):
     work = WORK / spec["name"]
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-
-    # The sdist, checked against the recipe's hash
-    archive = work / spec["sdist"].rsplit("/", 1)[-1]
-    with urllib.request.urlopen(spec["sdist"]) as response:
-        archive.write_bytes(response.read())
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != spec["sha256"]:
-        sys.exit(f"{archive.name} has sha256 {digest}, not the recipe's {spec['sha256']}")
-    src = work / "src"
-    src.mkdir()
-    with tarfile.open(archive) as tar:
-        # Backends stamp the files they generate with SOURCE_DATE_EPOCH, if
-        # set, rather than the time of the build: the sdist's newest file's
-        epoch = str(int(max(member.mtime for member in tar.getmembers())))
-        tar.extractall(src, filter="data")
-    (top,) = src.iterdir()
+    top, epoch = fetch(spec, work)
     for patch in sorted(recipe.glob("*.patch")):
         run("patch", "-p1", "-i", patch, cwd=top)
 
@@ -398,7 +427,8 @@ def sandboxed(args):
         sys.exit(f"{recipe} isn't a recipe in {RECIPES}")
     mounts = [(RECIPES, "ro"), (sdk, "ro"), (uv.parent, "ro")]
     if args.run is build:
-        out = Path(args.out).resolve()
+        # Mounted read-write, where the sdist's build code runs
+        out = outside_repo(args.out)
         out.mkdir(parents=True, exist_ok=True)
         sysroot = Path(args.sysroot).resolve()
         mounts += [(sysroot, "ro"), (out, "rw")]
@@ -439,6 +469,11 @@ def main():
     command.add_argument("--sandbox", action="store_true", help="Verify in a throwaway container")
     command.set_defaults(run=verify)
 
+    command = commands.add_parser("unpack", help="Unpack a recipe's sdist to read it")
+    command.add_argument("recipe")
+    command.add_argument("--out", required=True)
+    command.set_defaults(run=unpack)
+
     command = commands.add_parser("unpublished", help="List the recipes whose inputs aren't published")
     command.add_argument("recipes", nargs="+")
     command.set_defaults(run=unpublished)
@@ -450,6 +485,11 @@ def main():
     command.set_defaults(run=publish)
 
     args = parser.parse_args()
+    # Set for the agent (wheels-agent.yml), which may only build and verify
+    # in the sandbox: it can run build.py but can't change its environment
+    if os.environ.get("WHEELS_REQUIRE_SANDBOX") and args.run in (build, verify) \
+            and not args.sandbox:
+        sys.exit("WHEELS_REQUIRE_SANDBOX is set: build and verify only run with --sandbox")
     if getattr(args, "sandbox", False):
         sandboxed(args)
     else:

@@ -23,6 +23,10 @@ on:
       - '.github/actions/wheels-toolchain/**'
       - '.github/workflows/wheels.yml'
       - 'mise.toml'
+  # For the wheels agent's branches, which GITHUB_TOKEN pushes and so
+  # trigger nothing: wheels-agent.yml runs this on them, and the checks show
+  # on the PR. Only pushes to main publish
+  workflow_dispatch:
 
 concurrency:
   group: wheels-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
