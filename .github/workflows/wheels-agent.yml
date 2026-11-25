@@ -221,9 +221,10 @@ jobs:
             --title "feat(wheels): build $PACKAGE $VERSION for WebAssembly" --body-file "$body"
           gh workflow run wheels.yml --ref "$branch"
 
-  # The agent's run failed (out of turns, an API error): say so on the issue
+  # The agent's run or the PR's failed (out of turns, an API error, a check
+  # on what it left): say so on the issue
   failed:
-    needs: recipe
+    needs: [recipe, pull-request]
     if: failure()
     runs-on: ubuntu-latest
     permissions:
@@ -234,4 +235,4 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "The wheels agent's run failed before writing a recipe: $RUN"
+          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "The wheels agent's run failed: $RUN"

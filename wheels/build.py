@@ -39,6 +39,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -124,8 +125,14 @@ def unpublished(args):
     """Print the recipes whose inputs (`inputs()`) aren't published yet"""
     # Cloudflare refuses urllib's default User-Agent
     request = urllib.request.Request(INDEX_URL, headers={"User-Agent": "eryx-run-native-build"})
-    with urllib.request.urlopen(request) as response:
-        index = json.load(response)
+    try:
+        with urllib.request.urlopen(request) as response:
+            index = json.load(response)
+    except urllib.error.HTTPError as e:
+        # No index yet: nothing's published, as publish starts one
+        if e.code != 404:
+            sys.exit(f"Couldn't read {INDEX_URL}: {e}")
+        index = {"wheels": []}
     published = {(build["name"], build["version"], build["abi"], build.get("inputs"))
                  for build in index["wheels"]}
     for recipe in args.recipes:
@@ -142,7 +149,12 @@ def normalize(name):
 def load(recipe):
     recipe = Path(recipe).resolve()
     with open(recipe / "recipe.toml", "rb") as f:
-        return recipe, tomllib.load(f)
+        spec = tomllib.load(f)
+    # The name becomes a path (the build's work directory, which is cleared)
+    # and the index's name, so it must be the recipe's directory's
+    if normalize(spec["name"]) != recipe.name:
+        sys.exit(f"{recipe}'s name is {spec['name']!r}, but its directory is {recipe.name}")
+    return recipe, spec
 
 
 def run(*args, **kwargs):
@@ -485,7 +497,23 @@ def sandboxed(args):
     setup = (f"apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "
              f"--no-install-recommends {SANDBOX_PACKAGES} > /dev/null")
     script = f"{setup} && exec python3 {RECIPES}/build.py {shlex.join(map(str, inner))}"
-    run(*command, SANDBOX_IMAGE, "bash", "-c", script)
+    try:
+        run(*command, SANDBOX_IMAGE, "bash", "-c", script)
+    finally:
+        if args.run is build:
+            unlink_links(out)
+
+
+def unlink_links(directory):
+    """Delete the symlinks in `directory`: the build's code wrote it, and a
+    link (to /proc/self/environ, say) would have whatever reads it next, on
+    the host, read where it points instead"""
+    for root, dirs, files in os.walk(directory):
+        for name in dirs + files:
+            path = Path(root) / name
+            if path.is_symlink():
+                print(f"Removing the link {path} the build left", flush=True)
+                path.unlink()
 
 
 def main():
