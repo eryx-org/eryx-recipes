@@ -1,0 +1,13 @@
+# pydantic-core: Rust (PyO3), built with maturin. The version pydantic
+# 2.14.3 requires (`pydantic-core==2.50.4`). build.sh does the build, as
+# Rust needs its own cross-compiling setup.
+name = "pydantic-core"
+version = "2.50.4"
+sdist = "https://files.pythonhosted.org/packages/9c/0f/34f9ce4ba701dd0b815033ef94d99b56f66200e578ee6052aa3ac26f064e/pydantic_core-2.50.4.tar.gz"
+sha256 = "aead3b74b68396bf0feab5d57e050b730ded7df55853c1e048a87e00aaf033c6"
+# Installed in the build's venv
+requires = ["maturin>=1.16.0,<2"]
+# Imported in eryx after the build, so a module that doesn't load fails it
+imports = ["pydantic_core._pydantic_core"]
+# Installed beside the wheel for verify: pydantic_core imports it at load
+test_requires = ["typing-extensions==4.16.0"]

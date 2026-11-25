@@ -1,0 +1,12 @@
+# ujson: C, plus the bundled double-conversion (C++, no exceptions), built
+# by setuptools. The default `pip wheel` build does it: setup.py's
+# `-Wl,--strip-all` is only added on Linux, and the module links against
+# the wasi-sdk's libc++.so and libc++abi.so, which eryx provides.
+name = "ujson"
+version = "6.1.0"
+sdist = "https://files.pythonhosted.org/packages/e0/60/ad782f70ce03d12ec23288292a17549ca537f9d188227340ac0d082421b3/ujson-6.1.0.tar.gz"
+sha256 = "aef7ea4cd9e2e9f8a35c4538a9780d58c80d76c5da66a8dad269b4cc6d930c29"
+# Installed in the build's venv
+requires = ["setuptools>=80", "setuptools-scm[simple]>=9.2"]
+# Imported in eryx after the build, so a module that doesn't load fails it
+imports = ["ujson"]

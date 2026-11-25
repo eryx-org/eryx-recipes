@@ -1,0 +1,130 @@
+name: Native wheels
+
+# Builds every recipe in native/ for eryx's WASI and tests it in eryx. On
+# main, the wheels are published to the native wheels bucket (R2, public at
+# https://wheels.eryx.run), where builders install them
+# (src/builder/native.rs) and pip can (its simple index). Only main's runs get the bucket's
+# write key (the native-wheels environment), so a PR's recipe, which runs
+# its own build code, never sees it. Rebuilt when eryx moves, as its
+# libpython and libc are what wheels link to.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/actions/native-toolchain/**'
+      - 'eryx'
+      - 'src/builder/native.rs'
+      - '.github/workflows/native.yml'
+  # Any base, so stacked PRs build their recipes too
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/actions/native-toolchain/**'
+      - 'eryx'
+      - 'src/builder/native.rs'
+      - '.github/workflows/native.yml'
+
+concurrency:
+  group: native-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  # Main's publishes run one at a time, each finishing, as they edit one index
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  recipes:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+      # Where build runs: the eryx-desktop runner (scripts/desktop-runner)
+      # when the DESKTOP_RUNNER repo variable is `on`, for same-repo PRs.
+      # Main's builds are what publish uploads to the public bucket, so they
+      # always use GitHub's runners (Ubuntu 26.04, as the desktop's VMs). A
+      # fork can edit this expression, so it isn't the fork boundary (should
+      # the repo go public): the runner group's public-repo setting is.
+      runner: >-
+        ${{ (vars.DESKTOP_RUNNER == 'on'
+        && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository)
+        && '["self-hosted","eryx-desktop"]' || '"ubuntu-26.04"' }}
+    steps:
+      # The eryx submodule too: the ABI and libpython are build inputs
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      # Just the recipes a change touches, as builds take minutes each; all
+      # of them when anything else changes (build.py, the sysroot, the
+      # workflow, eryx, the ABI), or when there's nothing to compare with.
+      # Then only those whose inputs aren't published already: builds are
+      # reproducible, so an eryx or workflow change that leaves a recipe's
+      # inputs alone would rebuild the wheel that's there
+      - id: list
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          all=$(ls native/*/recipe.toml | cut -d/ -f2)
+          if changed=$(git diff --name-only "$BASE" HEAD 2>/dev/null) &&
+             ! grep -qvE '^native/[^/]+/' <<< "$changed"; then
+            recipes=$(grep -oP '^native/\K[^/]+(?=/)' <<< "$changed" | sort -u | grep -Fxf <(echo "$all") || true)
+          else
+            recipes=$all
+          fi
+          if [ -n "$recipes" ]; then
+            recipes=$(python3 native/build.py unpublished $recipes)
+          fi
+          echo "recipes=$(jq -Rc 'select(length > 0)' <<< "$recipes" | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: recipes
+    if: needs.recipes.outputs.recipes != '[]'
+    runs-on: ${{ fromJSON(needs.recipes.outputs.runner) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.recipes.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/native-toolchain
+
+      - name: Build
+        run: python3 native/build.py build "native/${{ matrix.recipe }}" --sysroot "$SYSROOT" --out dist
+
+      - name: Test in eryx
+        run: python3 native/build.py verify dist/*.whl "native/${{ matrix.recipe }}" --precompile target/release/eryx-precompile
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.recipe }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: native-wheels
+    steps:
+      # The eryx submodule too: the ABI has its wasi-sdk version
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          # An R2 token for the eryx-wheels bucket only
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: python3 native/build.py publish dist/*.whl

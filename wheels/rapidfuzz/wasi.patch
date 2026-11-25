@@ -1,0 +1,70 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,10 @@
+ cmake_minimum_required(VERSION 3.15...3.30)
+ 
+-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
++# With LTO, wasi-sdk links its libc statically, but a module has to use
++# eryx's libc.so (one heap)
++if(NOT CMAKE_TOOLCHAIN_FILE MATCHES "wasi-sdk")
++  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
++endif()
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ set(SKBUILD_LINK_LIBRARIES_KEYWORD PRIVATE)
+ set(THREADS_PREFER_PTHREAD_FLAG ON)
+@@ -116,7 +120,10 @@
+ if(NOT Taskflow_FOUND)
+   find_package(Taskflow 3.3.0 QUIET)
+ endif()
+-if(Taskflow_FOUND)
++if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
++  # WASI has no threads, and process_cpp.hpp doesn't use Taskflow there
++  add_library(Taskflow::Taskflow INTERFACE IMPORTED)
++elseif(Taskflow_FOUND)
+   message(STATUS "Using system supplied version of Taskflow")
+ else()
+   message(STATUS "Using packaged version of Taskflow")
+--- a/src/rapidfuzz/process_cpp.hpp
++++ b/src/rapidfuzz/process_cpp.hpp
+@@ -2,8 +2,10 @@
+ #include <chrono>
+ #include "cpp_common.hpp"
+ #include "rapidfuzz.h"
++#ifndef __wasi__
+ #include "taskflow/taskflow.hpp"
+ #include "taskflow/algorithm/for_each.hpp"
++#endif
+ #include <atomic>
+ #include <exception>
+ #include <stdexcept>
+@@ -447,7 +449,13 @@
+     PyThreadState* save = PyEval_SaveThread();
+ 
+     /* for these cases spawning threads causes to much overhead to be worth it */
+-    if (workers == 0 || workers == 1) {
++#ifdef __wasi__
++    /* WASI has no threads, so every call runs on this one */
++    (void)workers;
++#else
++    if (workers == 0 || workers == 1)
++#endif
++    {
+         for (int64_t row = 0; row < rows; row += step_size) {
+             if (KeyboardInterruptOccured(save)) {
+                 PyEval_RestoreThread(save);
+@@ -467,6 +475,7 @@
+         return;
+     }
+ 
++#ifndef __wasi__
+     if (workers < 0) {
+         workers = std::thread::hardware_concurrency();
+     }
+@@ -506,6 +515,7 @@
+     PyEval_RestoreThread(save);
+ 
+     if (exception) std::rethrow_exception(exception);
++#endif
+ }
+ 
+ template <typename T>
