@@ -20,8 +20,8 @@ set -euo pipefail
 # differs from eryx-build's default), the std_tool manifests' [source] ref and
 # commit, and the Go entries in third_party/manual.toml.
 GO_WASIP3_REPO="https://github.com/sd2k/go.git"
-GO_WASIP3_REF="wasip3-0.3.0-go1.27.4-branches"
-GO_WASIP3_COMMIT="f2006e361e755199dce61ff823137c8711d20ea9"
+GO_WASIP3_REF="wasip3-0.3.0-go1.27.4-branches-notetsleepg"
+GO_WASIP3_COMMIT="d09b5e114a563faeda64feaeb6d1b0256ddc5641"
 # Wasm features the compiler may use, written to the toolchain's go.env so
 # every build with this GOROOT (eryx-build, notices.py) gets them.
 # widearith (wide-arithmetic: 128-bit add/sub, 64x64->128 multiply) speeds up
