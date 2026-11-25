@@ -38,7 +38,7 @@ version = "0.16.2"
 # Signs the published commands and attaches their provenance (#6), and
 # attaches their notices and source offers as OCI referrers.
 [tools."aqua:sigstore/cosign"]
-version = "3.1.5"
+version = "3.1.6"
 [tools."aqua:oras-project/oras"]
 version = "1.4.0"
 
