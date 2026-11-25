@@ -15,8 +15,10 @@
 #   GOROOT_BOOTSTRAP=$(go env GOROOT) scripts/bootstrap-go-wasip3.sh [dest-dir]
 set -euo pipefail
 
-# --- Pinned toolchain (bump these together when moving the fork, with each Go
-# manifest's [build.go_toolchain] while it differs from eryx-build's default) ---
+# --- Pinned toolchain (bump these together when moving the fork) ---
+# Moving the fork also means: each Go manifest's [build.go_toolchain] (while it
+# differs from eryx-build's default), the std_tool manifests' [source] ref and
+# commit, and the Go entries in third_party/manual.toml.
 GO_WASIP3_REPO="https://github.com/sd2k/go.git"
 GO_WASIP3_REF="wasip3-0.3.0-go1.27.4-branches"
 GO_WASIP3_COMMIT="f2006e361e755199dce61ff823137c8711d20ea9"
