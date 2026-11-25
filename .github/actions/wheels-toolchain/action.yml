@@ -20,11 +20,27 @@ runs:
       uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
       with:
         version: 2026.11.12
-        install_args: uv rust
+        install_args: rust
         cache: false
 
+    # Not mise's uv: build.py runs it from build directories outside the
+    # repo, where a mise shim finds no version, and --sandbox mounts the
+    # binary itself into the container
+    - name: Versions of the tools
+      id: tools
+      shell: bash
+      run: echo "uv=$(grep -oP '^uv = "\K[^"]+' mise.toml)" >> "$GITHUB_OUTPUT"
+    - name: Install uv
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      with:
+        version: ${{ steps.tools.outputs.uv }}
+
+    # Just curl: without MISE_AUTO_INSTALL, `mise run` installs every tool in
+    # mise.toml first
     - name: Fetch eryx
       shell: bash
+      env:
+        MISE_AUTO_INSTALL: "false"
       run: mise run fetch-eryx
 
     - name: Versions
@@ -72,4 +88,6 @@ runs:
     - name: Install eryx-precompile
       if: steps.cache-precompile.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        MISE_AUTO_INSTALL: "false"
       run: mise run install-eryx-precompile

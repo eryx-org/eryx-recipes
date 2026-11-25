@@ -61,6 +61,8 @@ jobs:
           install: false
           cache: false
       - run: mise run fetch-eryx
+        env:
+          MISE_AUTO_INSTALL: "false"
       # Just the recipes a change touches, as builds take minutes each; all
       # of them when anything else changes (build.py, the sysroot, the
       # workflow, eryx_rev), or when there's nothing to compare with. Then
@@ -136,6 +138,8 @@ jobs:
           install: false
           cache: false
       - run: mise run fetch-eryx
+        env:
+          MISE_AUTO_INSTALL: "false"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
