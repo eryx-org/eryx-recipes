@@ -1,10 +1,11 @@
-name: Native build agent
+name: Wheels agent
 
 # Labelling a `native-package` issue (opened by builders when an environment
 # waits for a package with native code) `build-native` has Claude write a
-# recipe for it in native/, build and test it here, and open a PR. The PR is
+# recipe for it in wheels/, build and test it here, and open a PR. The PR is
 # reviewed like any other, and its recipe published only once it's merged
-# (native.yml), so nothing it writes reaches environments unreviewed.
+# (wheels.yml), so nothing it writes reaches environments unreviewed. The
+# issues are opened here by eryx-run's builders (ERYX_GITHUB_ISSUES_REPO).
 #
 # The sdist's build code is untrusted: the agent builds and verifies only
 # with `build.py --sandbox`, a container with none of this job's tokens.
@@ -18,7 +19,7 @@ on:
     types: [labeled]
 
 concurrency:
-  group: native-agent-${{ github.event.issue.number }}
+  group: wheels-agent-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
@@ -36,15 +37,17 @@ jobs:
       id-token: write
     steps:
       # No token left in .git/config for the sdist's build code to find
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
           persist-credentials: false
 
-      - uses: ./.github/actions/native-toolchain
+      - id: toolchain
+        uses: ./.github/actions/wheels-toolchain
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1.0.290
         env:
+          WASI_SDK_PATH: ${{ steps.toolchain.outputs.wasi-sdk }}
+          SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
           # From the issue, so passed as data rather than in the prompt
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -61,11 +64,11 @@ jobs:
             $ISSUE_TITLE) asks for a WebAssembly (WASI) build of a Python package with
             native code, for eryx-run's environments. Write a recipe for it.
 
-            1. Read native/README.md, and the existing recipes in native/*/, which
+            1. Read wheels/README.md, and the existing recipes in wheels/*/, which
                show C (setuptools), and possibly meson, CMake and Rust (maturin) builds.
             2. Find the package's sdist on PyPI for the version in the title
                (https://pypi.org/pypi/<package>/<version>/json) and write
-               native/<package>/recipe.toml, test.py, and build.sh or patches if the
+               wheels/<package>/recipe.toml, test.py, and build.sh or patches if the
                default `pip wheel` build isn't enough. Look at how Pyodide
                (pyodide/pyodide, packages/<package>/meta.yaml) and dicej/wasi-wheels
                build it for hints; WASI isn't Emscripten, but the patches show where
@@ -74,17 +77,17 @@ jobs:
                build code is untrusted, and the sandbox keeps it away from this job's
                credentials; it's an ubuntu:26.04 container with build-essential, so
                install anything else, such as rustup, in build.sh):
-                 python3 native/build.py build native/<package> --sysroot "$SYSROOT" --out /tmp/wheels --sandbox
-                 python3 native/build.py verify /tmp/wheels/<wheel> native/<package> --precompile target/release/eryx-precompile --sandbox
+                 python3 wheels/build.py build wheels/<package> --sysroot "$SYSROOT" --out /tmp/wheels --sandbox
+                 python3 wheels/build.py verify /tmp/wheels/<wheel> wheels/<package> --sandbox
                Never run the package's own build code (setup.py, build scripts, its
                tests) outside the sandbox. test.py must exercise the native code, not a
                pure-Python fallback.
-            4. Commit only native/<package>/ on a new branch named
-               native/<package>-<version>, push it, and open a draft PR against main
-               titled "feat(native): build <package> <version> for WebAssembly", whose
+            4. Commit only wheels/<package>/ on a new branch named
+               wheels/<package>-<version>, push it, and open a draft PR against main
+               titled "feat(wheels): build <package> <version> for WebAssembly", whose
                body says how it's built, what was patched and why, and what doesn't
                work, and ends with "Closes #$ISSUE_NUMBER".
 
             If it can't be done (for example it needs threads or processes in a way
             that can't be patched out), don't open a PR: comment on the issue saying
-            why, with what you tried. Never change anything outside native/<package>/.
+            why, with what you tried. Never change anything outside wheels/<package>/.

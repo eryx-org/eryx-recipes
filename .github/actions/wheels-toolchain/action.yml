@@ -1,58 +1,75 @@
-name: Native toolchain
+name: Wheels toolchain
 description: >-
-  What native/build.py needs to build and verify recipes: uv, eryx's
-  wasi-sdk (WASI_SDK_PATH), the sysroot (SYSROOT) and
-  target/release/eryx-precompile. Needs the repo checked out with submodules.
+  What wheels/build.py needs to build and verify recipes: uv, eryx at
+  mise.toml's eryx_rev (scratch/eryx, its mise.toml and libpython), eryx's
+  wasi-sdk, the sysroot and scratch/tools/bin/eryx-precompile. The steps
+  that build need WASI_SDK_PATH and SYSROOT set from its outputs.
+outputs:
+  wasi-sdk:
+    description: The wasi-sdk's directory, for WASI_SDK_PATH
+    value: ${{ steps.paths.outputs.wasi-sdk }}
+  sysroot:
+    description: The sysroot's directory, for SYSROOT
+    value: ${{ steps.paths.outputs.sysroot }}
 runs:
   using: composite
   steps:
+    # Rust only builds eryx-precompile, on a cache miss, but installing it
+    # just then would need a second mise-action step
+    - name: Install mise
+      uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      with:
+        version: 2026.11.12
+        install_args: uv rust
+        cache: false
+
+    - name: Fetch eryx
+      shell: bash
+      run: mise run fetch-eryx
+
     - name: Versions
       id: versions
       shell: bash
       run: |
-        echo "wasi-sdk=$(grep -oP '^wasi_sdk_version = "wasi-sdk-\K[0-9]+' eryx/mise.toml)" >> "$GITHUB_OUTPUT"
-        echo "uv=$(grep -oP '^uv = "\K[^"]+' mise.toml)" >> "$GITHUB_OUTPUT"
-        # As ci.yml computes it, to share its eryx-precompile
-        echo "runtime=eryx-runtime-$(git rev-parse HEAD:eryx)-$({ grep -E -- '--cpu-features' mise.toml; cat runtime-imports.txt; } | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v10.4.0
-      with:
-        version: ${{ steps.versions.outputs.uv }}
+        echo "wasi-sdk=$(grep -oP '^wasi_sdk_version = "wasi-sdk-\K[0-9]+' scratch/eryx/mise.toml)" >> "$GITHUB_OUTPUT"
+        echo "eryx=$(cat scratch/eryx/rev)" >> "$GITHUB_OUTPUT"
 
     - name: Install wasi-sdk
+      id: paths
       shell: bash
       env:
         VERSION: ${{ steps.versions.outputs.wasi-sdk }}
       run: |
         curl -sSfL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$VERSION/wasi-sdk-$VERSION.0-x86_64-linux.tar.gz" | tar xz -C "$RUNNER_TEMP"
-        echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-$VERSION.0-x86_64-linux" >> "$GITHUB_ENV"
-        echo "SYSROOT=$RUNNER_TEMP/sysroot" >> "$GITHUB_ENV"
+        echo "wasi-sdk=$RUNNER_TEMP/wasi-sdk-$VERSION.0-x86_64-linux" >> "$GITHUB_OUTPUT"
+        echo "sysroot=$RUNNER_TEMP/sysroot" >> "$GITHUB_OUTPUT"
 
     - name: Cache sysroot
       id: cache-sysroot
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/sysroot
-        key: native-sysroot-${{ steps.versions.outputs.wasi-sdk }}-${{ hashFiles('native/sysroot.sh', 'eryx/crates/eryx-runtime/libs/libpython3.14.so.zst') }}
+        key: wheels-sysroot-${{ steps.versions.outputs.wasi-sdk }}-${{ hashFiles('wheels/sysroot.sh', 'scratch/eryx/crates/eryx-runtime/libs/libpython3.14.so.zst') }}
 
     - name: Build sysroot
       if: steps.cache-sysroot.outputs.cache-hit != 'true'
       shell: bash
-      run: native/sysroot.sh "$SYSROOT"
+      env:
+        WASI_SDK_PATH: ${{ steps.paths.outputs.wasi-sdk }}
+        SYSROOT: ${{ steps.paths.outputs.sysroot }}
+      run: wheels/sysroot.sh "$SYSROOT"
 
+    # By eryx commit and the Rust toolchain that builds it
     - name: Cache eryx-precompile
       id: cache-precompile
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: target/release/eryx-precompile
-        key: eryx-precompile-${{ hashFiles('rust-toolchain.toml', 'mise.toml') }}-${{ steps.versions.outputs.runtime }}
+        path: |
+          scratch/tools/bin/eryx-precompile
+          scratch/tools/eryx-precompile-rev
+        key: eryx-precompile-${{ steps.versions.outputs.eryx }}-${{ hashFiles('mise.toml') }}
 
-    - name: Install mise
-      if: steps.cache-precompile.outputs.cache-hit != 'true'
-      uses: jdx/mise-action@v5
-
-    - name: Build eryx-precompile
+    - name: Install eryx-precompile
       if: steps.cache-precompile.outputs.cache-hit != 'true'
       shell: bash
-      run: mise run --skip-deps eryx-precompile
+      run: mise run install-eryx-precompile

@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""Build, verify and publish WASI wheels from the recipes in native/
+"""Build, verify and publish WASI wheels from the recipes in wheels/
 
-    native/build.py build RECIPE --sysroot DIR --out DIR [--sandbox]
-    native/build.py verify WHEEL RECIPE --precompile PATH [--sandbox]
-    native/build.py publish WHEEL... --bucket NAME --endpoint URL
+    wheels/build.py build RECIPE --sysroot DIR --out DIR [--sandbox]
+    wheels/build.py verify WHEEL RECIPE --precompile PATH [--sandbox]
+    wheels/build.py publish WHEEL... --bucket NAME --endpoint URL
 
 `build` downloads the recipe's sdist (checked against its hash) into a new
 directory and builds a wheel for eryx's WASI with the wasi-sdk at
-$WASI_SDK_PATH and a sysroot from native/sysroot.sh: `pip wheel`, unless the
+$WASI_SDK_PATH and a sysroot from wheels/sysroot.sh: `pip wheel`, unless the
 recipe has a build.sh. `verify` imports the recipe's modules in eryx and runs
 its test.py there, with eryx-precompile, alongside its `test_requires`
 (pure-Python packages from PyPI) and its `native_requires` (other recipes,
 built first). `publish` uploads wheels to the native wheels bucket (R2,
 public at https://wheels.eryx.run) and lists them in its index.json, which
-the builder reads (src/builder/native.rs), and in a PEP 503 simple index per
+eryx-run's builders read (its src/builder/native.rs), and in a PEP 503 simple index per
 ABI for pip (with the aws CLI and its usual AWS_* credentials).
 
 `--sandbox` runs a build or verify in a throwaway Docker container that has
 only the recipes, the toolchain and the output mounted, and none of this
 machine's environment, as an sdist's build code may not be trustworthy (the
-agent in native-agent.yml always uses it).
+agent in wheels-agent.yml always uses it).
 
 Needs Python 3.12+ (tarfile's `filter`) and uv; the wheel is built with a Python 3.14
 that uv provides.
@@ -43,6 +43,16 @@ import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+RECIPES = REPO / "wheels"
+# eryx at mise.toml's eryx_rev, as `mise run fetch-eryx` leaves it: its
+# mise.toml (the wasi-sdk version) and the libpython wheels link to
+ERYX = REPO / "scratch/eryx"
+
+# The ABI's prefix (`abi()` adds the wasi-sdk version): CPython 3.14 on
+# eryx's WASI, its libpython and libc. eryx-run's `native::ABI` must match
+# (its CI checks the index has builds for it), so change both together when
+# eryx's guest libraries change incompatibly other than by the wasi-sdk.
+ABI_PREFIX = "cp314-wasip2-sdk"
 
 # The platform tag wheels get, whatever their build backend chose: what
 # CPython's sysconfig.get_platform() reports on WASI, as maturin and
@@ -65,16 +75,17 @@ SANDBOX_PACKAGES = "python3 patch ca-certificates curl build-essential"
 
 
 def abi():
-    """The ABI the builder installs builds for (`native::ABI`): its prefix
-    and the wasi-sdk version from eryx's mise.toml, as build.rs reads it"""
-    source = (REPO / "src/builder/native.rs").read_text()
-    prefix = re.search(r'pub const ABI: &str = concat!\("([^"]+)"', source).group(1)
-    mise = (REPO / "eryx/mise.toml").read_text()
-    # As build.rs reads it: whatever's between `wasi-sdk-` and the quote
+    """The ABI builds are for: `ABI_PREFIX` and eryx's wasi-sdk version, as
+    eryx-run's build.rs reads it"""
+    try:
+        mise = (ERYX / "mise.toml").read_text()
+    except FileNotFoundError:
+        sys.exit(f"{ERYX / 'mise.toml'} is missing: run mise run fetch-eryx")
+    # Whatever's between `wasi-sdk-` and the quote
     sdk = re.search(r'^wasi_sdk_version = "wasi-sdk-([^"]+)"$', mise, re.M)
     if not sdk:
-        sys.exit('eryx/mise.toml has no wasi_sdk_version = "wasi-sdk-<N>"')
-    return prefix + sdk.group(1)
+        sys.exit('eryx\'s mise.toml has no wasi_sdk_version = "wasi-sdk-<N>"')
+    return ABI_PREFIX + sdk.group(1)
 
 
 def inputs(recipe):
@@ -99,11 +110,11 @@ def inputs(recipe):
             if path.is_file() and "__pycache__" not in path.parts:
                 add(path)
         for dep in spec.get("native_requires", []):
-            add_recipe(REPO / "native" / dep)
+            add_recipe(RECIPES / dep)
 
     add_recipe(recipe)
-    for path in (Path(__file__).resolve(), REPO / "native/sysroot.sh",
-                 REPO / "eryx/crates/eryx-runtime/libs/libpython3.14.so.zst"):
+    for path in (Path(__file__).resolve(), RECIPES / "sysroot.sh",
+                 ERYX / "crates/eryx-runtime/libs/libpython3.14.so.zst"):
         add(path)
     return digest.hexdigest()
 
@@ -117,7 +128,7 @@ def unpublished(args):
     published = {(build["name"], build["version"], build["abi"], build.get("inputs"))
                  for build in index["wheels"]}
     for recipe in args.recipes:
-        path, spec = load(REPO / "native" / recipe)
+        path, spec = load(RECIPES / recipe)
         if (normalize(spec["name"]), spec["version"], abi(), inputs(path)) not in published:
             print(recipe)
 
@@ -197,7 +208,7 @@ def build(args):
     native_deps = work / "native-deps"
     native_deps.mkdir()
     for dep in spec.get("native_requires", []):
-        dep_wheel = build(argparse.Namespace(recipe=REPO / "native" / dep, sysroot=sysroot, out=out / "deps"))
+        dep_wheel = build(argparse.Namespace(recipe=RECIPES / dep, sysroot=sysroot, out=out / "deps"))
         with zipfile.ZipFile(dep_wheel) as zf:
             zf.extractall(native_deps)
 
@@ -312,7 +323,7 @@ def publish(args):
                 "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
                 # What it was built from, for `unpublished`; recipes are
                 # named as their packages
-                "inputs": inputs(REPO / "native" / normalize(name)),
+                "inputs": inputs(RECIPES / normalize(name)),
             }
             # Keyed by hash, so never changed once there: cached for good
             aws("cp", wheel, f"s3://{args.bucket}/wheels/{build['sha256']}/{wheel.name}",
@@ -383,9 +394,9 @@ def sandboxed(args):
         sys.exit(f"--sandbox needs the uv binary itself on PATH, not {uv}")
     sdk = Path(os.environ["WASI_SDK_PATH"]).resolve()
     recipe = Path(args.recipe).resolve()
-    if (REPO / "native") not in recipe.parents:
-        sys.exit(f"{recipe} isn't a recipe in {REPO / 'native'}")
-    mounts = [(REPO / "native", "ro"), (sdk, "ro"), (uv.parent, "ro")]
+    if RECIPES not in recipe.parents:
+        sys.exit(f"{recipe} isn't a recipe in {RECIPES}")
+    mounts = [(RECIPES, "ro"), (sdk, "ro"), (uv.parent, "ro")]
     if args.run is build:
         out = Path(args.out).resolve()
         out.mkdir(parents=True, exist_ok=True)
@@ -406,7 +417,7 @@ def sandboxed(args):
         command += ["--volume", f"{path}:{path}:{mode}"]
     setup = (f"apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "
              f"--no-install-recommends {SANDBOX_PACKAGES} > /dev/null")
-    script = f"{setup} && exec python3 {REPO}/native/build.py {shlex.join(map(str, inner))}"
+    script = f"{setup} && exec python3 {RECIPES}/build.py {shlex.join(map(str, inner))}"
     run(*command, SANDBOX_IMAGE, "bash", "-c", script)
 
 
@@ -424,7 +435,7 @@ def main():
     command = commands.add_parser("verify", help="Import and test a wheel in eryx")
     command.add_argument("wheel")
     command.add_argument("recipe")
-    command.add_argument("--precompile", default="target/release/eryx-precompile")
+    command.add_argument("--precompile", default="scratch/tools/bin/eryx-precompile")
     command.add_argument("--sandbox", action="store_true", help="Verify in a throwaway container")
     command.set_defaults(run=verify)
 

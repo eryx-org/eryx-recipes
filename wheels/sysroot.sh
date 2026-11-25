@@ -5,21 +5,21 @@
 #   OUT/sysconfig/             its _sysconfigdata, for setuptools and friends
 #   OUT/lib/libpython3.14.so   eryx's own libpython, to link extensions to
 #
-# Usage: WASI_SDK_PATH=... native/sysroot.sh OUT
+# Usage: WASI_SDK_PATH=... wheels/sysroot.sh OUT (after mise run fetch-eryx)
 #
 # The headers come from CPython configured the way componentize-py builds
 # eryx's libpython (wasip2, -fPIC), at the same version, which this checks;
 # within 3.14 the ABI is stable, so they match the libpython eryx runs.
-# WASI_SDK_PATH must be the wasi-sdk eryx is built with (eryx/mise.toml's
-# wasi_sdk_version), so extensions link against the same libc.
+# WASI_SDK_PATH must be the wasi-sdk eryx is built with (its mise.toml's
+# wasi_sdk_version, in scratch/eryx/), so extensions link against the same libc.
 set -euo pipefail
 
-out=${1:?usage: native/sysroot.sh OUT}
+out=${1:?usage: wheels/sysroot.sh OUT}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 python_version=3.14.0
 : "${WASI_SDK_PATH:?set WASI_SDK_PATH to the wasi-sdk eryx uses}"
 
-libpython="$repo/eryx/crates/eryx-runtime/libs/libpython3.14.so.zst"
+libpython="$repo/scratch/eryx/crates/eryx-runtime/libs/libpython3.14.so.zst"
 if ! zstd -dc "$libpython" | strings | grep -x "$python_version" >/dev/null; then
     echo "eryx's libpython isn't CPython $python_version: update python_version" >&2
     exit 1
