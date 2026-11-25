@@ -57,7 +57,7 @@ upstream = "0.6.0"
 names = ["diff", "cmp"]
 
 [eryx.gh]
-version = "2.87.3-r.6"
+version = "2.87.3-r.7"
 
 [eryx.jaq]
 version = "3.1.2-r.4"
@@ -83,19 +83,19 @@ version = "2.56.1-r.4"
 # Go's own commands, from the wasip3 Go fork (clis/go.toml): go runs the
 # other three through eryx:process/run.
 [eryx.go]
-version = "1.27.4-r.1"
+version = "1.27.4-r.2"
 upstream = "1.27.4"
 # It writes the GOROOT go runs with, goroot.tar.gz, beside the component.
 files = ["scripts/go-root.sh"]
 
 [eryx.go-compile]
-version = "1.27.4-r.1"
+version = "1.27.4-r.2"
 upstream = "1.27.4"
 
 [eryx.go-asm]
-version = "1.27.4-r.1"
+version = "1.27.4-r.2"
 upstream = "1.27.4"
 
 [eryx.go-link]
-version = "1.27.4-r.1"
+version = "1.27.4-r.2"
 upstream = "1.27.4"

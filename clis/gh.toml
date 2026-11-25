@@ -32,6 +32,14 @@ vendor_patch = "clis/patches/patch-gh-vendor.sh"
 # section (2.2 MB); Go's own panics still name functions, from pclntab.
 ldflags = "-s -X github.com/cli/cli/v2/internal/build.Version={version}"
 
+[build.go_toolchain]
+# The wasip3 Go fork to build with, overriding eryx-build's default pin
+# (GoToolchain::default) until the next vars.eryx_rev bump picks it up. Must
+# match scripts/bootstrap-go-wasip3.sh, which CI builds the toolchain with.
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-branches"
+commit = "f2006e361e755199dce61ff823137c8711d20ea9"
+
 [component]
 # wasm-tools component world to embed.
 world = "command"
