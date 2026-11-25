@@ -38,6 +38,11 @@ concurrency:
 permissions:
   contents: read
 
+# build.py's directory isn't put on sys.path, so a recipe directory can't
+# shadow a module it imports (wheels/tomllib/__init__.py)
+env:
+  PYTHONSAFEPATH: "1"
+
 jobs:
   recipes:
     runs-on: ubuntu-latest
@@ -151,4 +156,11 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
-        run: python3 wheels/build.py publish dist/*.whl
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ ${#wheels[@]} -eq 0 ]; then
+            echo "Nothing built, so nothing to publish"
+            exit 0
+          fi
+          python3 wheels/build.py publish "${wheels[@]}"

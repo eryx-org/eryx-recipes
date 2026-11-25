@@ -460,10 +460,16 @@ def sandboxed(args):
         wheel, precompile = Path(args.wheel).resolve(), Path(args.precompile).resolve()
         if strict():
             # A wheel a build left in a scratch directory, and the toolchain's
-            # eryx-precompile: nothing else of the host's is mounted
-            if not (wheel.suffix == ".whl" and wheel.is_file()
+            # eryx-precompile: nothing else of the host's is mounted. The
+            # build's code wrote that directory, so no symlinks: they'd have
+            # the sandbox mount whatever they point at
+            given = Path(args.wheel).absolute()
+            if not (given == wheel and wheel.suffix == ".whl" and wheel.is_file()
                     and wheel.parent.parent == Path("/tmp").resolve()):
-                sys.exit(f"{wheel} must be a wheel a build left in /tmp/<dir>/")
+                sys.exit(f"{given} must be a wheel a build left in /tmp/<dir>/, not a link")
+            deps = wheel.parent / "deps"
+            if deps.is_symlink() or (deps.exists() and not deps.is_dir()):
+                sys.exit(f"{deps} must be a directory, not a link")
             if precompile != (REPO / "scratch/tools/bin/eryx-precompile").resolve():
                 sys.exit("--precompile can't be changed")
         mounts += [(wheel, "ro"), (precompile, "ro")]

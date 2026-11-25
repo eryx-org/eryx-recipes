@@ -36,6 +36,11 @@ concurrency:
 permissions:
   contents: read
 
+# build.py's directory isn't put on sys.path, so a recipe directory can't
+# shadow a module it imports (wheels/tomllib/__init__.py)
+env:
+  PYTHONSAFEPATH: "1"
+
 jobs:
   recipe:
     # Only on the builders' issues, not any issue someone labels
@@ -66,6 +71,12 @@ jobs:
             exit 1
           fi
           package=${BASH_REMATCH[1]} version=${BASH_REMATCH[3]}
+          # Not a module name build.py could import (PYTHONSAFEPATH covers it
+          # too)
+          if python3 -c 'import sys; sys.exit(sys.argv[1].replace("-", "_") in sys.stdlib_module_names)' "$package"; then :; else
+            echo "::error::$package is a standard library module's name"
+            exit 1
+          fi
           if [ -e "wheels/$package" ]; then
             echo "::error::wheels/$package already exists"
             exit 1
@@ -189,7 +200,7 @@ jobs:
             gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/recipe/CANNOT.md"
             exit 0
           fi
-          branch="wheels/$PACKAGE-$VERSION"
+          branch="wheels/$PACKAGE-$VERSION-$GITHUB_RUN_ID"
           body="$RUNNER_TEMP/pr.md"
           if [ -f "$RUNNER_TEMP/recipe/PR.md" ]; then
             mv "$RUNNER_TEMP/recipe/PR.md" "$body"
@@ -209,3 +220,18 @@ jobs:
           gh pr create --draft --base main --head "$branch" \
             --title "feat(wheels): build $PACKAGE $VERSION for WebAssembly" --body-file "$body"
           gh workflow run wheels.yml --ref "$branch"
+
+  # The agent's run failed (out of turns, an API error): say so on the issue
+  failed:
+    needs: recipe
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "The wheels agent's run failed before writing a recipe: $RUN"
