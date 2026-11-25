@@ -1,7 +1,7 @@
 # rapidfuzz: C++ (rapidfuzz-cpp, header-only) wrapped by Cython, built with
 # scikit-build-core and CMake. The sdist ships the Cython output (.cxx), so
 # Cython isn't needed. Runs in the unpacked sdist, with build.py's
-# environment (see native/README.md).
+# environment (see wheels/README.md).
 set -eu
 
 recipe=$(dirname "$0")

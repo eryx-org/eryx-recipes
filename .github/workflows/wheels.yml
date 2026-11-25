@@ -52,7 +52,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
       # eryx's mise.toml and libpython: the ABI and libpython are build inputs
       - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
@@ -63,28 +62,18 @@ jobs:
       - run: mise run fetch-eryx
         env:
           MISE_AUTO_INSTALL: "false"
-      # Just the recipes a change touches, as builds take minutes each; all
-      # of them when anything else changes (build.py, the sysroot, the
-      # workflow, eryx_rev), or when there's nothing to compare with. Then
-      # only those whose inputs aren't published already: builds are
+      # The recipes whose inputs (the recipe and its native_requires,
+      # build.py, the sysroot's inputs, the ABI) aren't published yet. Every
+      # recipe is checked, not just those the change touches: a push whose
+      # pending run was cancelled by a newer one still gets its recipes
+      # built, a recipe others build against (numpy for pandas) rebuilds
+      # them too, and one that failed to build is retried. Builds are
       # reproducible, so a change that leaves a recipe's inputs alone (most
-      # eryx_rev bumps, a tool bump in mise.toml) would rebuild the wheel
-      # that's there
+      # eryx_rev bumps, a tool bump in mise.toml) builds nothing
       - id: list
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          all=$(for recipe in wheels/*/recipe.toml; do basename "$(dirname "$recipe")"; done)
-          if changed=$(git diff --name-only "$BASE" HEAD 2>/dev/null) &&
-             ! grep -qvE '^wheels/[^/]+/' <<< "$changed"; then
-            recipes=$(grep -oP '^wheels/\K[^/]+(?=/)' <<< "$changed" | sort -u | grep -Fxf <(echo "$all") || true)
-          else
-            recipes=$all
-          fi
-          if [ -n "$recipes" ]; then
-            mapfile -t names <<< "$recipes"
-            recipes=$(python3 wheels/build.py unpublished "${names[@]}")
-          fi
+          mapfile -t names < <(for recipe in wheels/*/recipe.toml; do basename "$(dirname "$recipe")"; done)
+          recipes=$(python3 wheels/build.py unpublished "${names[@]}")
           echo "recipes=$(jq -Rc 'select(length > 0)' <<< "$recipes" | jq -sc .)" >> "$GITHUB_OUTPUT"
 
   build:
@@ -121,8 +110,11 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  # What built is published even if another recipe failed, so one broken
+  # recipe doesn't hold back the rest (or a new ABI's builds); the failed
+  # one is retried on the next push, as it's still unpublished
   publish:
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result != 'skipped' }}
     needs: build
     runs-on: ubuntu-latest
     environment: wheels

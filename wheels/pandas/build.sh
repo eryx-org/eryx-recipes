@@ -1,6 +1,6 @@
 #!/bin/bash
 # pandas builds with meson, which takes the cross-compiler from a cross file
-# rather than build.py's CC/CFLAGS, so write one from them (as native/numpy
+# rather than build.py's CC/CFLAGS, so write one from them (as wheels/numpy
 # does), against our numpy's headers.
 set -eu
 
@@ -31,7 +31,7 @@ $AR rcs libnoexcept.a noexcept.o
 
 # Compilers that link shared libraries (the extensions) to libpython, which
 # only exists as a .so, so meson's checks can still link test programs. As in
-# native/numpy/build.sh: wasm-ld itself, no library groups, and the sysroot's
+# wheels/numpy/build.sh: wasm-ld itself, no library groups, and the sysroot's
 # Python headers in place of the build Python's.
 host_include=$(python -c 'import sysconfig; print(sysconfig.get_path("include"))')
 mkdir wasi-bin
