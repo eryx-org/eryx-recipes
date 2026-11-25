@@ -13,12 +13,15 @@
 !/clis/
 !/scripts/
 !/third_party/
+!/wheels/
 !/wit/
 
 # Never committed, even inside the directories above: build checkouts and
 # outputs, secrets and credentials, and agent session logs.
 scratch/
 target/
+__pycache__/
+*.pyc
 # Fetched from eryx-org/eryx at a pinned commit (mise run fetch-coreutils).
 /clis/coreutils.toml
 /clis/patches/patch-uucore-wasip2.sh

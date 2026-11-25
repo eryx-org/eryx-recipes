@@ -1,0 +1,21 @@
+# pandas: Cython, C and one C++ extension (window/aggregations), built by
+# meson-python with a cross file (build.sh) against our numpy's headers.
+name = "pandas"
+version = "3.1.1"
+sdist = "https://files.pythonhosted.org/packages/17/ca/24c6bc92aca3d366146358e47f1d374c0e1a50763ef226fc71eff20a63fb/pandas-3.1.1.tar.gz"
+sha256 = "05fed3e3b7c99b226f160e29d7d6cb7ef39638c758cbfe42b3f24ba34f04b859"
+requires = ["meson-python>=0.19.0,<1", "meson>=1.2.3,<2", "Cython>3.1.0,<4", "ninja", "versioneer[toml]", "wheel"]
+# Compiled against our numpy (its wasm32 headers), and imported with it
+native_requires = ["numpy"]
+# tzdata: pandas 3 reads time zones with zoneinfo, and WASI has no system
+# time zone database
+test_requires = ["python-dateutil==4.0.0", "tzdata==2026.6"]
+imports = [
+  "pandas",
+  "pandas._libs.lib",
+  "pandas._libs.hashtable",
+  "pandas._libs.join",
+  "pandas._libs.parsers",
+  "pandas._libs.tslibs.timestamps",
+  "pandas._libs.window.aggregations",
+]

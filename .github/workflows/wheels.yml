@@ -1,0 +1,166 @@
+name: Wheels
+
+# Builds the recipes in wheels/ for eryx's WASI and tests them in eryx, against
+# eryx at mise.toml's eryx_rev (`mise run fetch-eryx`). On main, the wheels are
+# published to the wheels bucket (R2, public at https://wheels.eryx.run), where
+# eryx-run's builders install them and pip can (its simple index). Only
+# main's runs get the bucket's write key (the wheels environment), so a PR's
+# recipe, which runs its own build code, never sees it. Rebuilt when eryx_rev
+# moves to an eryx whose libpython or wasi-sdk changed, as those are what
+# wheels link to.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wheels/**'
+      - '.github/actions/wheels-toolchain/**'
+      - '.github/workflows/wheels.yml'
+      - 'mise.toml'
+  # Any base, so stacked PRs build their recipes too
+  pull_request:
+    paths:
+      - 'wheels/**'
+      - '.github/actions/wheels-toolchain/**'
+      - '.github/workflows/wheels.yml'
+      - 'mise.toml'
+  # For the wheels agent's branches, which GITHUB_TOKEN pushes and so
+  # trigger nothing: wheels-agent.yml runs this on them, and the checks show
+  # on the PR. Only pushes to main publish
+  workflow_dispatch:
+
+concurrency:
+  # One group for main's pushes, and one per PR or dispatched branch, so a
+  # wheels-agent run can't replace a pending publish
+  group: wheels-${{ github.event_name == 'push' && 'main' || github.ref }}
+  # Main's publishes run one at a time, each finishing, as they edit one index
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# build.py's directory isn't put on sys.path, so a recipe directory can't
+# shadow a module it imports (wheels/tomllib/__init__.py)
+env:
+  PYTHONSAFEPATH: "1"
+
+jobs:
+  recipes:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+      # Where build runs: the eryx-desktop runner (eryx-run's
+      # scripts/desktop-runner) when the DESKTOP_RUNNER repo variable is `on`,
+      # for same-repo PRs. Main's builds are what publish uploads to the public
+      # bucket, so they always use GitHub's runners (Ubuntu 26.04, as the
+      # desktop's VMs). A fork can edit this expression, so it isn't the fork
+      # boundary (should the repo go public): the runner group's public-repo
+      # setting is.
+      runner: >-
+        ${{ (vars.DESKTOP_RUNNER == 'on'
+        && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository)
+        && '["self-hosted","eryx-desktop"]' || '"ubuntu-26.04"' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # eryx's mise.toml and libpython: the ABI and libpython are build inputs
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          version: 2026.11.12
+          install: false
+          cache: false
+      - run: mise run fetch-eryx
+        env:
+          MISE_AUTO_INSTALL: "false"
+      # The recipes whose inputs (the recipe and its native_requires,
+      # build.py, the sysroot's inputs, the ABI) aren't published yet. Every
+      # recipe is checked, not just those the change touches: a push whose
+      # pending run was cancelled by a newer one still gets its recipes
+      # built, a recipe others build against (numpy for pandas) rebuilds
+      # them too, and one that failed to build is retried. Builds are
+      # reproducible, so a change that leaves a recipe's inputs alone (most
+      # eryx_rev bumps, a tool bump in mise.toml) builds nothing
+      - id: list
+        run: |
+          mapfile -t names < <(for recipe in wheels/*/recipe.toml; do basename "$(dirname "$recipe")"; done)
+          recipes=$(python3 wheels/build.py unpublished "${names[@]}")
+          echo "recipes=$(jq -Rc 'select(length > 0)' <<< "$recipes" | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: recipes
+    if: needs.recipes.outputs.recipes != '[]'
+    runs-on: ${{ fromJSON(needs.recipes.outputs.runner) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.recipes.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: toolchain
+        uses: ./.github/actions/wheels-toolchain
+
+      - name: Build
+        env:
+          RECIPE: ${{ matrix.recipe }}
+          WASI_SDK_PATH: ${{ steps.toolchain.outputs.wasi-sdk }}
+          SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
+        run: python3 wheels/build.py build "wheels/$RECIPE" --sysroot "$SYSROOT" --out dist
+
+      - name: Test in eryx
+        env:
+          RECIPE: ${{ matrix.recipe }}
+        run: python3 wheels/build.py verify dist/*.whl "wheels/$RECIPE"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wheel-${{ matrix.recipe }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # What built is published even if another recipe failed, so one broken
+  # recipe doesn't hold back the rest (or a new ABI's builds); the failed
+  # one is retried on the next push, as it's still unpublished
+  publish:
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.build.result != 'skipped' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: wheels
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # eryx's mise.toml, for the ABI, and libpython, for each wheel's inputs
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          version: 2026.11.12
+          install: false
+          cache: false
+      - run: mise run fetch-eryx
+        env:
+          MISE_AUTO_INSTALL: "false"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          # An R2 token for the eryx-wheels bucket only
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ ${#wheels[@]} -eq 0 ]; then
+            echo "Nothing built, so nothing to publish"
+            exit 0
+          fi
+          python3 wheels/build.py publish "${wheels[@]}"

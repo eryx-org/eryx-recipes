@@ -8,6 +8,9 @@ rust = { version = "1.100.0", profile = "default" }
 # it finds it on PATH, so pin that too.
 actionlint = "1.7.12"
 shellcheck = "0.11.0"
+# The wheels' builds (wheels/build.py): their venvs, and resolving recipes'
+# test requirements. CI installs this version with setup-uv.
+uv = "0.13.9"
 
 # Runs the commands' smoke tests. Keep it on the wasmtime version eryx uses,
 # so the commands are tested against the WASI versions eryx's host provides.
@@ -74,6 +77,39 @@ fi
 cargo install --locked --quiet --root scratch/tools \
     --git https://github.com/eryx-org/eryx --rev "{{vars.eryx_rev}}" eryx-build
 echo "{{vars.eryx_rev}}" > scratch/tools/eryx-rev
+"""
+
+[tasks.fetch-eryx]
+description = "Fetch what the wheels build against from eryx-org/eryx at vars.eryx_rev into scratch/eryx: its mise.toml (the wasi-sdk version, so the ABI) and libpython"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+cd scratch 2>/dev/null || { mkdir scratch && cd scratch; }
+if [ "$(cat eryx/rev 2>/dev/null)" = "{{vars.eryx_rev}}" ]; then
+    exit 0
+fi
+for f in mise.toml crates/eryx-runtime/libs/libpython3.14.so.zst; do
+    mkdir -p "eryx/$(dirname "$f")"
+    curl -fsSL -o "eryx/$f" "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.eryx_rev}}/$f"
+done
+echo "{{vars.eryx_rev}}" > eryx/rev
+"""
+
+[tasks.install-eryx-precompile]
+description = "Install eryx-precompile from eryx-org/eryx at vars.eryx_rev into scratch/tools, for verifying wheels in eryx"
+# BOOTSTRAP lets eryx build without a runtime.cwasm: --preinit builds the
+# runtime from the guest libraries committed at that commit
+env = { ERYX_PRECOMPILE_BOOTSTRAP = "1" }
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+BIN=scratch/tools/bin/eryx-precompile
+if [ -x "$BIN" ] && [ "$(cat scratch/tools/eryx-precompile-rev 2>/dev/null)" = "{{vars.eryx_rev}}" ]; then
+    exit 0
+fi
+cargo install --locked --quiet --root scratch/tools \
+    --git https://github.com/eryx-org/eryx --rev "{{vars.eryx_rev}}" eryx-precompile
+echo "{{vars.eryx_rev}}" > scratch/tools/eryx-precompile-rev
 """
 
 [tasks.install-license-classifier]

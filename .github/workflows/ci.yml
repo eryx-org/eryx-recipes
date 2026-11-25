@@ -117,7 +117,9 @@ jobs:
               - 'clis/smoke.sh'
               - 'mise.toml'
               - '.github/workflows/ci.yml'
-              - '.github/actions/**'
+              # The commands' own actions, not wheels-toolchain (wheels.yml's)
+              - '.github/actions/eryx-build/**'
+              - '.github/actions/setup-binstall/**'
               # The cache key, and each command's version (in its SBOM).
               - 'scripts/publish.py'
               - 'commands.toml'

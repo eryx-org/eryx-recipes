@@ -1,6 +1,13 @@
 # eryx-recipes
 
-Command components for [eryx](https://github.com/eryx-org/eryx) shell sandboxes: CLI tools (ripgrep, jq, curl, gh, git, ...) built from upstream source as WASI components, and published to an OCI registry.
+Recipes for building third-party software for [eryx](https://github.com/eryx-org/eryx), from upstream source:
+
+- **Commands** (`clis/`, the rest of this README): CLI tools for eryx shell sandboxes (ripgrep, jq, curl, gh, git, ...) as WASI components, published to an OCI registry.
+- **Wheels** (`wheels/`, see [its README](wheels/README.md)): Python packages with native code (numpy, pandas, pydantic-core, ...) as WASI wheels, published to a pip index at `https://wheels.eryx.run`.
+
+Both build against eryx at `mise.toml`'s `eryx_rev`.
+
+## Commands
 
 - **Recipes** (`clis/*.toml`): one per command. Each pins the upstream source and its patches, and is built by [eryx-build](https://github.com/eryx-org/eryx/tree/multi-guest/crates/eryx-build). GPL recipes live apart, in `clis/gpl/`. coreutils' recipe isn't kept here: eryx builds the same coreutils for its embedded commands, so `mise run fetch-coreutils` fetches `clis/coreutils.toml` and its uucore patch from eryx at `vars.coreutils_rev`, and `mise run bump-coreutils [-- BRANCH]` moves that pin (and the version) to the branch's newest change to them. A new upstream coreutils version also needs `third_party/manual.toml`'s uutils entry (`version`, `url`, `cli_commit`) and `third_party/licenses/coreutils-LICENSE` updated by hand; `mise run notices-check` fails until they are. check-clis and check-versions fail if the fetched copy isn't the pinned one.
 - **Registry:** `ghcr.io/eryx-org/commands/<namespace>/<name>:<upstream>-r.<n>`. That's `eryx:<name>` for permissively licensed commands and `eryx-gpl:<name>` for GPL ones. The layout and metadata follow [wkg](https://github.com/bytecodealliance/wasm-pkg-tools)'s conventions, so `wkg` can fetch them.
