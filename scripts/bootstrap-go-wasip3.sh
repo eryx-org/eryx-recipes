@@ -15,10 +15,11 @@
 #   GOROOT_BOOTSTRAP=$(go env GOROOT) scripts/bootstrap-go-wasip3.sh [dest-dir]
 set -euo pipefail
 
-# --- Pinned toolchain (bump these together when moving the fork) ---
+# --- Pinned toolchain (bump these together when moving the fork, and the Go
+# manifests' [build.go_toolchain], until eryx-build's default is this pin) ---
 GO_WASIP3_REPO="https://github.com/sd2k/go.git"
-GO_WASIP3_REF="wasip3-0.3.0-go1.27.4-exit-code"
-GO_WASIP3_COMMIT="331bf58bd2672eda182895f30fd2c688721deba7"
+GO_WASIP3_REF="wasip3-0.3.0-go1.27.4-notetsleepg"
+GO_WASIP3_COMMIT="0281ae4a6ff5470bd07dc400674d1f94731b50e4"
 # Wasm features the compiler may use, written to the toolchain's go.env so
 # every build with this GOROOT (eryx-build, notices.py) gets them.
 # widearith (wide-arithmetic: 128-bit add/sub, 64x64->128 multiply) speeds up

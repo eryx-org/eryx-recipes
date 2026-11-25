@@ -32,6 +32,14 @@ vendor_patch = "clis/patches/patch-gh-vendor.sh"
 # section (2.2 MB); Go's own panics still name functions, from pclntab.
 ldflags = "-s -X github.com/cli/cli/v2/internal/build.Version={version}"
 
+# The fork with the notetsleepg fix (signal.Notify no longer starves async
+# I/O), until eryx-build's default pin moves to it. Same pin as
+# scripts/bootstrap-go-wasip3.sh.
+[build.go_toolchain]
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-notetsleepg"
+commit = "0281ae4a6ff5470bd07dc400674d1f94731b50e4"
+
 [component]
 # wasm-tools component world to embed.
 world = "command"

@@ -15,14 +15,22 @@ lang = "go"
 [source]
 # The fork at the commit the Go lane builds with: std_tool builds need both.
 repo = "https://github.com/sd2k/go.git"
-ref = "wasip3-0.3.0-go1.27.4-exit-code"
-commit = "331bf58bd2672eda182895f30fd2c688721deba7"
+ref = "wasip3-0.3.0-go1.27.4-notetsleepg"
+commit = "0281ae4a6ff5470bd07dc400674d1f94731b50e4"
 dir = "scratch/go-src"
 
 [build]
 package = "cmd/compile"
 std_tool = true
 vendor_patch = "clis/patches/patch-go.sh"
+
+# The fork with the notetsleepg fix (signal.Notify no longer starves async
+# I/O), until eryx-build's default pin moves to it. Same pin as
+# scripts/bootstrap-go-wasip3.sh.
+[build.go_toolchain]
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-notetsleepg"
+commit = "0281ae4a6ff5470bd07dc400674d1f94731b50e4"
 
 [cwasm]
 # Loaded as a plain component; the host compiles it on demand.
