@@ -61,7 +61,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMMANDS = "commands.toml"
 LOCK = "commands.lock"
 REPOSITORY_PREFIX = "eryx-org/commands"
-SOURCE_URL = "https://github.com/eryx-org/eryx-commands"
+SOURCE_URL = "https://github.com/eryx-org/eryx-recipes"
 ERYX_URL = "https://github.com/eryx-org/eryx"
 # `<MAJOR.MINOR.PATCH>-r.<n>`: semver, with the revision as a prerelease
 # whose numeric part compares numerically (`-r.2 < -r.10`), as wkg needs.

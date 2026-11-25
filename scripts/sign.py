@@ -57,10 +57,14 @@ import publish
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SOURCE_URL = "https://github.com/eryx-org/eryx-commands"
+SOURCE_URL = "https://github.com/eryx-org/eryx-recipes"
 # The publish workflow's certificate identity and issuer, as consumers
 # verify them (eryx-org/eryx#998). The publish job only runs from main.
 IDENTITY = f"{SOURCE_URL}/.github/workflows/ci.yml@refs/heads/main"
+# What counts as already signed: that identity, or the same workflow under
+# the repo's old name (eryx-commands), which signed everything published
+# before the rename
+IDENTITY_PATTERN = r"^https://github\.com/eryx-org/eryx-(commands|recipes)/\.github/workflows/ci\.yml@refs/heads/main$"
 ISSUER = "https://token.actions.githubusercontent.com"
 
 NOTICES_TYPE = "application/vnd.eryx.notices.v1+markdown"
@@ -88,7 +92,7 @@ def provenance_predicate(result: dict, provenance: dict, revision: str, env: dic
     this repo at `revision` by the GitHub Actions run in `env`, from its
     upstream source and patches as its provenance.json records them."""
     server = env.get("GITHUB_SERVER_URL", "https://github.com")
-    repository = env.get("GITHUB_REPOSITORY", "eryx-org/eryx-commands")
+    repository = env.get("GITHUB_REPOSITORY", "eryx-org/eryx-recipes")
     workflow_ref = env.get("GITHUB_WORKFLOW_REF", f"{repository}/.github/workflows/ci.yml@local")
     path, _, ref = workflow_ref.removeprefix(f"{repository}/").partition("@")
     source = provenance["source"]
@@ -289,7 +293,7 @@ class Tools:
         if key:
             self.verifying = ["--key", str(pub), "--insecure-ignore-tlog"]
         else:
-            self.verifying = ["--certificate-identity", IDENTITY,
+            self.verifying = ["--certificate-identity-regexp", IDENTITY_PATTERN,
                               "--certificate-oidc-issuer", ISSUER]
             if not tlog:
                 self.verifying.append("--insecure-ignore-tlog")

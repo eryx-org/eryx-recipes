@@ -1,4 +1,4 @@
-# eryx-commands
+# eryx-recipes
 
 Command components for [eryx](https://github.com/eryx-org/eryx) shell sandboxes: CLI tools (ripgrep, jq, curl, gh, git, ...) built from upstream source as WASI components, and published to an OCI registry.
 
@@ -7,7 +7,7 @@ Command components for [eryx](https://github.com/eryx-org/eryx) shell sandboxes:
 - **Versions:** each published version is immutable. `<upstream>-r.<n>` is the upstream release plus our build revision, which bumps whenever the binary changes. There are no floating tags.
 - **Notices:** each command ships its third-party notices (the tool, what it links, its crates or modules) and is signed with its provenance (see [Signatures and referrers](#signatures-and-referrers)).
 
-The design and decisions are in [#1](https://github.com/eryx-org/eryx-commands/issues/1).
+The design and decisions are in [#1](https://github.com/eryx-org/eryx-recipes/issues/1).
 
 ## Building a command
 
@@ -99,11 +99,13 @@ To verify a command:
 
 ```sh
 ref=ghcr.io/eryx-org/commands/eryx/sd@sha256:...
-id=https://github.com/eryx-org/eryx-commands/.github/workflows/ci.yml@refs/heads/main
+# This repo was eryx-commands until 2026-11-25, and what was published
+# before then is signed under that name
+id='^https://github\.com/eryx-org/eryx-(commands|recipes)/\.github/workflows/ci\.yml@refs/heads/main$'
 issuer=https://token.actions.githubusercontent.com
-cosign verify --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
+cosign verify --certificate-identity-regexp "$id" --certificate-oidc-issuer "$issuer" "$ref"
 cosign verify-attestation --type slsaprovenance1 \
-  --certificate-identity "$id" --certificate-oidc-issuer "$issuer" "$ref"
+  --certificate-identity-regexp "$id" --certificate-oidc-issuer "$issuer" "$ref"
 oras discover "$ref"   # the notices, SBOM and source offer
 ```
 

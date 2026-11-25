@@ -24,8 +24,8 @@ PROVENANCE = {
 }
 ENV = {
     "GITHUB_SERVER_URL": "https://github.com",
-    "GITHUB_REPOSITORY": "eryx-org/eryx-commands",
-    "GITHUB_WORKFLOW_REF": "eryx-org/eryx-commands/.github/workflows/ci.yml@refs/heads/main",
+    "GITHUB_REPOSITORY": "eryx-org/eryx-recipes",
+    "GITHUB_WORKFLOW_REF": "eryx-org/eryx-recipes/.github/workflows/ci.yml@refs/heads/main",
     "GITHUB_RUN_ID": "42",
     "GITHUB_RUN_ATTEMPT": "2",
 }
@@ -44,13 +44,13 @@ class Sign(unittest.TestCase):
         p = sign.provenance_predicate(RESULT, PROVENANCE, "1234", ENV)
         self.assertEqual(p["runDetails"]["builder"]["id"], sign.IDENTITY)
         self.assertEqual(p["runDetails"]["metadata"]["invocationId"],
-                         "https://github.com/eryx-org/eryx-commands/actions/runs/42/attempts/2")
+                         "https://github.com/eryx-org/eryx-recipes/actions/runs/42/attempts/2")
         self.assertEqual(p["buildDefinition"]["externalParameters"]["workflow"],
                          {"ref": "refs/heads/main", "path": ".github/workflows/ci.yml",
-                          "repository": "https://github.com/eryx-org/eryx-commands"})
+                          "repository": "https://github.com/eryx-org/eryx-recipes"})
         earlier = sign.provenance_predicate(RESULT, PROVENANCE, "1234", {**ENV, "ERYX_BUILD_RUN_ID": "7"})
         self.assertEqual(earlier["runDetails"]["metadata"]["invocationId"],
-                         "https://github.com/eryx-org/eryx-commands/actions/runs/7")
+                         "https://github.com/eryx-org/eryx-recipes/actions/runs/7")
         deps = p["buildDefinition"]["resolvedDependencies"]
         self.assertEqual([d["digest"] for d in deps],
                          [{"gitCommit": "1234"}, {"gitCommit": "c0ffee"}, {"sha256": "d" * 64}])
