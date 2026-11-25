@@ -166,6 +166,9 @@ def fetch(spec, work):
     against the recipe's hash and unpack it into `work/src`, as data: no
     links out, special files or absolute paths, and none of its code runs.
     Returns its top directory and its newest file's mtime"""
+    # Only PyPI's files: urlopen would also read file:// URLs, on the host
+    if not spec["sdist"].startswith("https://files.pythonhosted.org/"):
+        sys.exit(f"{spec['sdist']} isn't an sdist on https://files.pythonhosted.org/")
     archive = work / spec["sdist"].rsplit("/", 1)[-1]
     with urllib.request.urlopen(spec["sdist"]) as response:
         archive.write_bytes(response.read())
@@ -186,7 +189,7 @@ def fetch(spec, work):
 def unpack(args):
     """Unpack a recipe's sdist into OUT/src to read, without building it"""
     _, spec = load(args.recipe)
-    out = outside_repo(args.out)
+    out = scratch(args.out) if strict() else outside_repo(args.out)
     if out.exists():
         sys.exit(f"{out} exists: unpack makes a new directory, so nothing is overwritten")
     out.mkdir(parents=True)
@@ -201,6 +204,24 @@ def outside_repo(path):
     path = Path(path).resolve()
     if path == REPO or REPO in path.parents or path in REPO.parents:
         sys.exit(f"{path} overlaps {REPO}: choose a directory outside it, such as /tmp/wheels")
+    return path
+
+
+def strict():
+    """Whether this is the agent (wheels-agent.yml), whose arguments may come
+    from a hostile package: build and verify only run in the sandbox, and
+    only with the paths `scratch` allows mounted"""
+    return bool(os.environ.get("WHEELS_REQUIRE_SANDBOX"))
+
+
+def scratch(path):
+    """`path` if it's a new directory directly in /tmp: for the agent, the
+    only host directories the sandbox may mount read-write (or `unpack` write
+    to), so the package's code can't reach the checkout, the agent's own
+    files, the Docker socket or anything else on the host"""
+    path = Path(path).resolve()
+    if path.parent != Path("/tmp").resolve() or path.exists():
+        sys.exit(f"{path} must be a new directory directly in /tmp, such as /tmp/wheels-1")
     return path
 
 
@@ -428,13 +449,23 @@ def sandboxed(args):
     mounts = [(RECIPES, "ro"), (sdk, "ro"), (uv.parent, "ro")]
     if args.run is build:
         # Mounted read-write, where the sdist's build code runs
-        out = outside_repo(args.out)
-        out.mkdir(parents=True, exist_ok=True)
         sysroot = Path(args.sysroot).resolve()
+        if strict() and sysroot != Path(os.environ["SYSROOT"]).resolve():
+            sys.exit(f"--sysroot must be $SYSROOT ({os.environ['SYSROOT']})")
+        out = scratch(args.out) if strict() else outside_repo(args.out)
+        out.mkdir(parents=True, exist_ok=True)
         mounts += [(sysroot, "ro"), (out, "rw")]
         inner = ["build", recipe, "--sysroot", sysroot, "--out", out]
     else:
         wheel, precompile = Path(args.wheel).resolve(), Path(args.precompile).resolve()
+        if strict():
+            # A wheel a build left in a scratch directory, and the toolchain's
+            # eryx-precompile: nothing else of the host's is mounted
+            if not (wheel.suffix == ".whl" and wheel.is_file()
+                    and wheel.parent.parent == Path("/tmp").resolve()):
+                sys.exit(f"{wheel} must be a wheel a build left in /tmp/<dir>/")
+            if precompile != (REPO / "scratch/tools/bin/eryx-precompile").resolve():
+                sys.exit("--precompile can't be changed")
         mounts += [(wheel, "ro"), (precompile, "ro")]
         if (wheel.parent / "deps").is_dir():
             mounts.append((wheel.parent / "deps", "ro"))

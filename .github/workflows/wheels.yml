@@ -29,7 +29,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: wheels-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  # One group for main's pushes, and one per PR or dispatched branch, so a
+  # wheels-agent run can't replace a pending publish
+  group: wheels-${{ github.event_name == 'push' && 'main' || github.ref }}
   # Main's publishes run one at a time, each finishing, as they edit one index
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 

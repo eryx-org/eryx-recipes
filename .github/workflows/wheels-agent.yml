@@ -13,11 +13,13 @@ name: Wheels agent
 #
 # - `recipe` runs it with a read-only token it never sees (the claude CLI,
 #   not claude-code-action, so no GitHub token is handed to it) and no
-#   id-token. Its tools are reading, editing only wheels/<package>/, fetching
-#   from PyPI and GitHub, and `wheels/build.py unpack|build|verify`. build.py
-#   refuses to build or verify outside its sandbox (WHEELS_REQUIRE_SANDBOX, a
-#   container with none of this job's environment) or to write into the
-#   checkout.
+#   id-token. Its tools are reading the checkout and /tmp (not /proc, so not
+#   its own environment), editing only wheels/<package>/, fetching from PyPI
+#   and GitHub, and `wheels/build.py unpack|build|verify`. With
+#   WHEELS_REQUIRE_SANDBOX, build.py only builds and verifies in its sandbox
+#   (a container with none of this job's environment), mounts nothing of the
+#   host's there but the toolchain and new directories in /tmp, and only
+#   fetches sdists from files.pythonhosted.org.
 # - `pull-request` takes only wheels/<package>/ from it, and opens the PR (or
 #   comments on the issue) with GITHUB_TOKEN. No agent or package code runs
 #   there.
@@ -121,13 +123,15 @@ jobs:
           "$RUNNER_TEMP/claude/node_modules/.bin/claude" -p "$prompt" \
             --model claude-opus-5-5 --max-turns 300 \
             --setting-sources project --strict-mcp-config --permission-mode dontAsk \
-            --allowedTools Read Glob Grep \
+            --allowedTools "Read(./**)" "Read(//tmp/**)" "Glob(./**)" "Glob(//tmp/**)" \
+              "Grep(./**)" "Grep(//tmp/**)" \
               "Edit(wheels/$PACKAGE/**)" "Write(wheels/$PACKAGE/**)" \
               "Bash(python3 wheels/build.py unpack:*)" \
               "Bash(python3 wheels/build.py build:*)" \
               "Bash(python3 wheels/build.py verify:*)" \
               "WebFetch(domain:pypi.org)" "WebFetch(domain:github.com)" \
-              "WebFetch(domain:raw.githubusercontent.com)"
+              "WebFetch(domain:raw.githubusercontent.com)" \
+            --disallowedTools "Read(//proc/**)" "Glob(//proc/**)" "Grep(//proc/**)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -160,12 +164,17 @@ jobs:
           name: recipe
           path: ${{ runner.temp }}/recipe
 
-      # Only regular files, at most 1 MB in all, go into wheels/<package>/
+      # Only regular files, at most 1 MB in all, go into wheels/<package>/,
+      # and nothing that looks like an Anthropic key goes public
       - name: Check what the agent left
         run: |
           cd "$RUNNER_TEMP/recipe"
           if find . ! -type f ! -type d | grep -q .; then
             echo "::error::The recipe has something other than files and directories"
+            exit 1
+          fi
+          if grep -rqE 'sk-ant-[A-Za-z0-9_-]{8,}' .; then
+            echo "::error::The recipe has something that looks like an Anthropic key"
             exit 1
           fi
           size=$(du -sb . | cut -f1)

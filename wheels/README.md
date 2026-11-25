@@ -119,15 +119,19 @@ then ask for, so it's treated as hostile:
 
 - The agent's job has a read-only token, which it never sees (it runs the
   `claude` CLI, not claude-code-action), and no `id-token`. Its tools are
-  reading, editing only `wheels/<package>/` (the name parsed from the
+  reading the checkout and `/tmp` (not `/proc`, so not its own
+  environment), editing only `wheels/<package>/` (the name parsed from the
   issue's title), fetching from PyPI and GitHub, and `build.py unpack`,
   `build` and `verify`.
 - `WHEELS_REQUIRE_SANDBOX` makes `build.py` refuse to build or verify
-  without `--sandbox`, and `unpack` and the sandbox's output refuse a
-  directory overlapping the checkout, so the package's code can't reach
-  `build.py`.
+  without `--sandbox`, take `--out` (or `unpack`'s) only as a new directory
+  directly in `/tmp`, and mount nothing else of the host's but the job's
+  sysroot, wasi-sdk, uv and eryx-precompile. sdists only come from
+  `https://files.pythonhosted.org/`. So the package's code can't reach
+  `build.py`, the agent's own files, the Docker socket or the environment.
 - A second job, with no agent and nothing of the package's running, takes
-  only `wheels/<package>/` (regular files, at most 1 MB), pushes it to a
+  only `wheels/<package>/` (regular files, at most 1 MB, nothing like an
+  Anthropic key), pushes it to a
   branch and opens the PR with `GITHUB_TOKEN`, then runs `wheels.yml` on
   the branch, as pushes with that token trigger nothing.
 
