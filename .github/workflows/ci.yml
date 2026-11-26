@@ -123,7 +123,10 @@ jobs:
           # A push that creates the branch has no before commit.
           push) [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || base="$BEFORE" ;;
           esac
-          python3 scripts/publish.py matrix ${base:+--base "$base"} | tee -a "$GITHUB_OUTPUT"
+          # Into a file first: through a pipe, a failing matrix would leave
+          # the step green and the lanes' matrices empty
+          python3 scripts/publish.py matrix ${base:+--base "$base"} > "$RUNNER_TEMP/matrix"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/matrix"
 
   check:
     name: Check manifests
