@@ -1,0 +1,135 @@
+name: Sandbox
+
+# Exercises the sandbox (scripts/sandbox.py) the agents build in: a command
+# of each lane built and smoke-tested in it, as an agent would (with
+# RECIPES_REQUIRE_SANDBOX), and checked byte for byte against the same build
+# outside it; and a wheel built and verified in it. CI's own builds
+# (ci.yml, wheels.yml) don't use the sandbox, so this runs only when what it's
+# made of changes, and weekly, to catch the image's packages moving.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'scripts/sandbox.py'
+      - 'scripts/publish.py'
+      - 'scripts/bootstrap-go-wasip3.sh'
+      - 'wheels/build.py'
+      - 'clis/smoke.sh'
+      - 'mise.toml'
+      - '.github/actions/**'
+      - '.github/workflows/sandbox.yml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  schedule:
+    - cron: '41 6 * * 1' # Mondays
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # build.py's directory isn't put on sys.path (see wheels.yml)
+  PYTHONSAFEPATH: "1"
+
+jobs:
+  command:
+    name: Build ${{ matrix.cli }} in the sandbox (${{ matrix.lane }} lane)
+    # The sandbox's image's release, so its tools are the runner's
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cli: sd, lane: rust }
+          - { cli: jq, lane: c }
+          - { cli: go-asm, lane: go }
+    env:
+      CLI: ${{ matrix.cli }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-binstall
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          version: 2026.11.12
+          install_args: rust aqua:bytecodealliance/wasmtime cargo:wasm-tools github:bytecodealliance/wit-bindgen
+          cache: false
+      - uses: ./.github/actions/eryx-build
+      - if: matrix.lane != 'go'
+        run: rustup target add wasm32-wasip2
+      # The build outside the sandbox needs what ci.yml's C lane installs
+      - if: matrix.lane == 'c'
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build bison
+          mise run ensure-wasi-sdk
+      # The fork as ci.yml's Go lane builds it, from its cache when main has
+      # saved one
+      - name: Restore the wasip3 Go toolchain
+        id: go-wasip3-cache
+        if: matrix.lane == 'go'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scratch/go-wasip3
+          key: go-wasip3-${{ hashFiles('scripts/bootstrap-go-wasip3.sh') }}
+      - if: matrix.lane == 'go' && steps.go-wasip3-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27'
+          cache: false
+      - name: Bootstrap the wasip3 Go toolchain
+        if: matrix.lane == 'go'
+        run: |
+          if [ ! -x scratch/go-wasip3/bin/go ]; then
+            GOROOT_BOOTSTRAP="$(go env GOROOT)"
+            export GOROOT_BOOTSTRAP
+          fi
+          GOROOT="$(scripts/bootstrap-go-wasip3.sh scratch/go-wasip3)"
+          echo "ERYX_GO_WASIP3_ROOT=$GOROOT" >> "$GITHUB_ENV"
+
+      - name: Build and smoke-test it in the sandbox, as an agent
+        env:
+          RECIPES_REQUIRE_SANDBOX: "1"
+        run: |
+          out=$(mise run build-cli -- "$CLI" --sandbox --scratch "/tmp/sandbox-$CLI")
+          [ "$out" = "/tmp/sandbox-$CLI/$CLI-component" ] || { echo "::error::build-cli printed '$out'"; exit 1; }
+          clis/smoke.sh "$CLI" --sandbox --scratch "/tmp/sandbox-$CLI"
+          # Its strict mode refuses to build or test outside it
+          if mise run build-cli -- "$CLI" || clis/smoke.sh "$CLI"; then
+            echo "::error::RECIPES_REQUIRE_SANDBOX didn't stop a build or smoke test outside the sandbox"
+            exit 1
+          fi
+      - name: Build it outside the sandbox
+        run: mise run build-cli -- "$CLI"
+      - name: Compare the two
+        run: |
+          sha256sum "/tmp/sandbox-$CLI/$CLI-component/component.wasm" "scratch/$CLI-component/component.wasm"
+          cmp "/tmp/sandbox-$CLI/$CLI-component/component.wasm" "scratch/$CLI-component/component.wasm" \
+            || { echo "::error::$CLI's sandboxed build differs from the one outside the sandbox"; exit 1; }
+
+  wheel:
+    name: Build markupsafe in the sandbox
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: toolchain
+        uses: ./.github/actions/wheels-toolchain
+      # As wheels-agent.yml's agent does
+      - name: Build and verify it in the sandbox
+        env:
+          RECIPES_REQUIRE_SANDBOX: "1"
+          WASI_SDK_PATH: ${{ steps.toolchain.outputs.wasi-sdk }}
+          SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
+        run: |
+          python3 wheels/build.py build wheels/markupsafe --sysroot "$SYSROOT" --out /tmp/wheels-1 --sandbox
+          python3 wheels/build.py verify /tmp/wheels-1/markupsafe-*.whl wheels/markupsafe --sandbox
