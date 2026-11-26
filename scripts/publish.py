@@ -434,10 +434,13 @@ def check_versions(root: Path, base: str | None) -> list[str]:
 
     base_commands, base_mise, changed, moved = {}, {}, set(), {}
     if base:
-        base_commands = commands_at(root, base)
-        base_mise = tomllib.loads(git(root, "show", f"{base}:mise.toml", check=False) or "")
-        changed, moved = changes(root, base)
+        # Everything as of where this branch left `base`, as its changes are
+        # (`base...HEAD`), so a branch behind `base` isn't judged on what
+        # moved there since: a command bumped there would look moved back
         merge_base = git(root, "merge-base", base, "HEAD").strip()
+        base_commands = commands_at(root, merge_base)
+        base_mise = tomllib.loads(git(root, "show", f"{merge_base}:mise.toml", check=False) or "")
+        changed, moved = changes(root, base)
     moved_from = {new: old for old, new in moved.items()}
 
     def only_moved(path: str) -> bool:
