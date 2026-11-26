@@ -98,6 +98,14 @@ version = "0.6.0-r.2"
 digest = "sha256:357e6ac51e9ffad9a3589847c4fdf9dc0a8f83586a3504aabfd4f0208ce08f94"
 
 [[packages]]
+name = "eryx:fd"
+
+[[packages.versions]]
+requirement = "=10.5.2-r.1"
+version = "10.5.2-r.1"
+digest = "sha256:3234354306abcea6041a968d7b28ed3d5d2981a07cf92cfeaf4a0a48e13c89ce"
+
+[[packages]]
 name = "eryx:find"
 
 [[packages.versions]]
@@ -122,6 +130,11 @@ name = "eryx:gcx"
 requirement = "=1.9.0-r.1"
 version = "1.9.0-r.1"
 digest = "sha256:6a270dfeecb364bccafc042ec9db23c73fdbbe357fa3b1eab0bb31bb8caf2b75"
+
+[[packages.versions]]
+requirement = "=1.9.1-r.2"
+version = "1.9.1-r.2"
+digest = "sha256:b3a12df2cc925aa237a716dd7ef46f7bae0711f5c70550b8e05a9ff68f4dcf5e"
 
 [[packages]]
 name = "eryx:gh"
