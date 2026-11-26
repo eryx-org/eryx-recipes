@@ -503,7 +503,8 @@ jobs:
             --fail-existing --out scratch/results.json "${dirs[@]}"
           python3 scripts/publish.py lock --results scratch/results.json
           cat scratch/results.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - id: dry-run-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: publish-dry-run
           path: |
@@ -515,10 +516,15 @@ jobs:
       # signing (which would certify a run that isn't the publish job's). The
       # results are read back from the artifact, as the sign job reads
       # `published`, so a path that only works locally fails here.
+      # By the ID the upload just returned: looking it up by name straight
+      # after uploading it sometimes found nothing ("Artifact not found for
+      # name: publish-dry-run"); merge-multiple keeps the files directly in
+      # path, as a download by name does
       - if: ${{ hashFiles('scratch/results.json') != '' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: publish-dry-run
+          artifact-ids: ${{ steps.dry-run-artifact.outputs.artifact-id }}
+          merge-multiple: true
           path: scratch/published
       - name: Sign and attach to the local registry
         if: ${{ hashFiles('scratch/results.json') != '' }}
