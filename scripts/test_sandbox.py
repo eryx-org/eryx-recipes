@@ -110,11 +110,15 @@ class Mounts(unittest.TestCase):
         # Only the environment given, and never the Docker socket
         self.assertEqual([command[i + 1] for i, a in enumerate(command) if a == "--env"], ["A=b"])
         self.assertNotIn("docker.sock", " ".join(command))
+        self.assertIn("no-new-privileges", command[command.index("--security-opt") + 1])
 
     def test_runs_as_the_user_after_setup(self):
         script = sandbox.docker_command([], {}, "echo 'hi'", "curl", user=(1000, 100))[-1]
         self.assertIn("apt-get", script.split("setpriv")[0])
         self.assertIn("setpriv --reuid=1000 --regid=100 --clear-groups", script)
+        # The build keeps no capabilities, and nothing can gain any
+        self.assertIn("--bounding-set=-all", script)
+        self.assertIn("--no-new-privs", script)
 
     def test_refuses_mounts_that_add_fields(self):
         for path in (Path("/tmp/a,source=/"), Path('/tmp/a"b'), Path("relative")):

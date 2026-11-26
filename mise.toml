@@ -136,12 +136,12 @@ mise where "$SPEC" >/dev/null 2>&1 || mise install "$SPEC"
 """
 
 [tasks.build-cli]
-description = "Build a command from its manifest (clis/<name>/<name>.toml). Usage: mise run build-cli -- <name|path.toml> [--sandbox [--scratch DIR]]"
+description = "Build a command from its manifest (clis/<name>/<name>.toml). Usage: mise run build-cli -- <name|path.toml>, or <name> --sandbox [--scratch DIR]"
 depends = ["install-eryx-build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
-NAME="${1:?Usage: mise run build-cli -- <name|path.toml> [--sandbox [--scratch DIR]] (e.g. rg, curl, gh)}"
+NAME="${1:?Usage: mise run build-cli -- <name|path.toml>, or <name> --sandbox [--scratch DIR] (e.g. rg, curl, gh)}"
 # In a throwaway container (scripts/sandbox.py), which prints the component
 # dir it leaves outside the checkout.
 if [ "${2:-}" = --sandbox ]; then

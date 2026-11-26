@@ -68,7 +68,8 @@ SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 BUILD_PACKAGES = ("ca-certificates curl git unzip xz-utils bzip2 build-essential cmake "
                   "ninja-build bison autoconf automake libtool pkg-config perl python3")
 # The smoke tests' tools beyond the image's: `strings` (git's)
-SMOKE_PACKAGES = "binutils"
+# ca-certificates: gh's smoke test copies their bundle for its HTTPS call
+SMOKE_PACKAGES = "binutils ca-certificates"
 # A command's name, as its directory's (clis/<name>/)
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
@@ -159,7 +160,9 @@ def docker_command(mounts, env, script, packages, workdir="/tmp", user=None):
     installs `packages` first; then the script runs as `user` (uid, gid), if
     given, or root"""
     check_mounts(mounts)
-    command = ["docker", "run", "--rm", "--init", "--workdir", str(workdir)]
+    # No setuid binary in the image can raise anyone's privileges
+    command = ["docker", "run", "--rm", "--init", "--security-opt", "no-new-privileges",
+               "--workdir", str(workdir)]
     for name, value in env.items():
         command += ["--env", f"{name}={value}"]
     # --mount, not --volume: it refuses a missing source rather than create
@@ -169,7 +172,9 @@ def docker_command(mounts, env, script, packages, workdir="/tmp", user=None):
         command += ["--mount", mount if writable else f"{mount},readonly"]
     if user:
         uid, gid = user
-        script = f"exec setpriv --reuid={uid} --regid={gid} --clear-groups -- bash -c {shlex.quote(script)}"
+        # With no capabilities left at all, not just none effective
+        script = (f"exec setpriv --reuid={uid} --regid={gid} --clear-groups --inh-caps=-all "
+                  f"--bounding-set=-all --no-new-privs -- bash -c {shlex.quote(script)}")
     setup = (f"apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "
              f"--no-install-recommends {packages} > /dev/null")
     return command + [IMAGE, "bash", "-c", f"{setup} && {script}"]
@@ -301,6 +306,8 @@ def build_cli(args):
         # The build's output on stderr, so stdout is just the path
         run(build_mounts(scratch_dir, tools), env, script, BUILD_PACKAGES,
             workdir=REPO, user=(os.getuid(), os.getgid()), stdout=sys.stderr)
+    except subprocess.CalledProcessError:
+        sys.exit(f"The build failed; its scratch directory is {scratch_dir}")
     finally:
         unlink_links(scratch_dir)
     out = scratch_dir / f"{args.name}-component"
