@@ -17,5 +17,6 @@ expect "$(gcxw --env GCX_TELEMETRY=off --env GRAFANA_SERVER=https://play.grafana
     "$OUT/component.wasm" api /api/health)" '"database": "ok"'
 # With telemetry on, gcx posts a usage event before it exits. That and
 # reading its config both hung while os/signal's receiver kept the
-# scheduler from polling (scripts/bootstrap-go-wasip3.sh).
-expect "$(gcxw "$OUT/component.wasm" config view)" "current-context"
+# scheduler from polling (scripts/bootstrap-go-wasip3.sh). It's off by
+# default here (patches/patch-gcx-vendor.sh), so turn it on to check that.
+expect "$(gcxw --env GCX_TELEMETRY=enabled "$OUT/component.wasm" config view)" "current-context"
