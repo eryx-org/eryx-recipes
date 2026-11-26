@@ -364,6 +364,62 @@ class CheckVersions(ScratchRepo):
         self.assertIn("clis/gpl/git/patches/git-wasi.patch", paths)
         self.assertIn("clis/gpl/git/shims/wasi-git.h", paths)
 
+    def test_moving_inputs_and_rewriting_their_paths_isnt_a_change(self):
+        self.write("clis/patches/patch-sd.sh", 'cp "$dir/../shims/sd.h" x  # clis/shims\n')
+        self.write("clis/shims/sd.h", "1\n")
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD").strip()
+        (self.root / "clis/sd").mkdir()
+        self.git("mv", "clis/sd.toml", "clis/sd/sd.toml")
+        self.git("mv", "clis/patches", "clis/sd/patches")
+        self.git("mv", "clis/shims", "clis/sd/shims")
+        manifest = self.root / "clis/sd/sd.toml"
+        manifest.write_text("# moved\n" + manifest.read_text().replace(
+            "clis/patches/patch-sd.sh", "clis/sd/patches/patch-sd.sh"))
+        self.write("clis/sd/patches/patch-sd.sh", 'cp "$dir/../shims/sd.h" x  # clis/sd/shims\n')
+        self.write("commands.toml", (self.root / "commands.toml").read_text().replace(
+            '[eryx.sd]', '[eryx.sd]\nmanifest = "clis/sd/sd.toml"'))
+        self.commit()
+        self.assertEqual(self.problems(), [])
+        # A real change to a moved file still counts.
+        self.write("clis/sd/shims/sd.h", "2\n")
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("clis/sd/shims/sd.h", problem)
+
+    def test_a_moved_file_with_other_edits_is_a_change(self):
+        (self.root / "clis/sd").mkdir()
+        self.git("mv", "clis/patches/patch-sd.sh", "clis/sd/patch-sd.sh")
+        self.write("clis/sd.toml", (self.root / "clis/sd.toml").read_text().replace(
+            "clis/patches/patch-sd.sh", "clis/sd/patch-sd.sh"))
+        self.write("clis/sd/patch-sd.sh", "echo 1\necho 2\n")
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("clis/sd/patch-sd.sh", problem)
+        self.assertNotIn("clis/sd.toml", problem)
+
+    def test_a_manifest_naming_another_file_is_a_change(self):
+        self.write("clis/patches/other.sh", "echo 1\n")
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD").strip()
+        self.write("clis/sd.toml", (self.root / "clis/sd.toml").read_text().replace(
+            "clis/patches/patch-sd.sh", "clis/patches/other.sh"))
+        self.commit()
+        [problem] = self.problems()
+        self.assertIn("clis/sd.toml", problem)
+
+    def test_rewrite_paths(self):
+        moved = {"clis/shims/awk/sys/wait.h": "clis/awk/shims/awk/sys/wait.h",
+                 "clis/shims/awk-wasi.c": "clis/awk/shims/awk-wasi.c",
+                 "clis/shims/mbedtls-wasi.c": "clis/shared/shims/mbedtls-wasi.c",
+                 "clis/go.toml": "clis/go/go.toml"}
+        self.assertEqual(
+            publish.rewrite_paths("see clis/go.toml. (clis/shims/awk/sys) clis/shims "
+                                  "{repo}/clis/shims/awk-wasi.c clis/go.tomlx", moved),
+            "see clis/go/go.toml. (clis/awk/shims/awk/sys) clis/shims "
+            "{repo}/clis/awk/shims/awk-wasi.c clis/go.tomlx",
+        )
+
     def test_a_version_never_goes_below_a_locked_one(self):
         self.write("commands.lock", publish.write_lock({"eryx:sd": {"1.1.0-r.3": "sha256:a"}}))
         problems = publish.check_versions(self.root, None)

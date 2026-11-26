@@ -313,11 +313,21 @@ def check_versions(root: Path, base: str | None) -> list[str]:
     for key in sorted(found.keys() - commands.keys()):
         problems.append(f"{key[0]}:{key[1]} ({found[key]}) has no entry in {COMMANDS}")
 
-    base_commands, base_mise, changed = {}, {}, set()
+    base_commands, base_mise, changed, moved = {}, {}, set(), {}
     if base:
         base_commands = load_commands(git(root, "show", f"{base}:{COMMANDS}", check=False) or "")
         base_mise = tomllib.loads(git(root, "show", f"{base}:mise.toml", check=False) or "")
-        changed = set(git(root, "diff", "--name-only", f"{base}...HEAD").split())
+        changed, moved = changes(root, base)
+        merge_base = git(root, "merge-base", base, "HEAD").strip()
+    moved_from = {new: old for old, new in moved.items()}
+
+    def only_moved(path: str) -> bool:
+        """Whether `path` is its base version with only the paths in it
+        moved (same_recipe), so not a change to what's built."""
+        old_path = moved_from.get(path, path)
+        old = git(root, "show", f"{merge_base}:{old_path}", check=False)
+        new = git(root, "show", f"HEAD:{path}", check=False)
+        return old is not None and new is not None and same_recipe(old, old_path, new, path, moved)
     mise = tomllib.loads((root / "mise.toml").read_text())
     lock_path = root / LOCK
     locked = read_lock(lock_path.read_text() if lock_path.exists() else "")
@@ -389,7 +399,7 @@ def check_versions(root: Path, base: str | None) -> list[str]:
             continue
         touched = sorted(
             path for path in changed
-            if any(path == i or path.startswith(i + "/") for i in paths)
+            if any(path == i or path.startswith(i + "/") for i in paths) and not only_moved(path)
         )
         if pin_values(base_mise, pins) != pin_values(mise, pins):
             touched.append("mise.toml (a pinned toolchain or recipe)")
@@ -399,6 +409,98 @@ def check_versions(root: Path, base: str | None) -> list[str]:
                 f"{entry['version']} needs a new revision"
             )
     return problems
+
+
+def changes(root: Path, base: str) -> tuple[set[str], dict[str, str]]:
+    """What changed from `base` to HEAD (`base...HEAD`): the paths whose
+    content is new, changed or gone, and every rename, old -> new. A pure
+    rename (git's R100) isn't a change, so neither of its paths is in the
+    first; one with edits has both. git can't pair a small file whose edit
+    leaves it under half the same, so an added file is also taken for a
+    deleted one with the same name, when there's only one."""
+    out = git(root, "diff", "--name-status", "-z", "-M", f"{base}...HEAD") or ""
+    fields = out.split("\0")
+    changed, moved, added, deleted = set(), {}, [], []
+    i = 0
+    while i < len(fields) and fields[i]:
+        status = fields[i]
+        if status[0] in "RC":
+            old, new = fields[i + 1], fields[i + 2]
+            i += 3
+            if status[0] == "R":
+                moved[old] = new
+            if status != "R100":
+                changed.update({old, new} if status[0] == "R" else {new})
+        else:
+            changed.add(fields[i + 1])
+            {"A": added, "D": deleted}.get(status[0], []).append(fields[i + 1])
+            i += 2
+    for new in added:
+        same_name = [old for old in deleted if Path(old).name == Path(new).name]
+        if len(same_name) == 1:
+            moved[same_name[0]] = new
+    return changed, moved
+
+
+def moved_dirs(moved: dict[str, str]) -> dict[str, str]:
+    """The directories a set of renames moved whole: `a/x/f` -> `b/x/f`
+    moved `a/x` to `b/x`, unless another file under `a/x` went elsewhere."""
+    candidates: dict[str, set[str]] = {}
+    for old, new in moved.items():
+        o, n = old.split("/"), new.split("/")
+        i = 1
+        while i < min(len(o), len(n)) and o[-i] == n[-i]:
+            candidates.setdefault("/".join(o[:-i]), set()).add("/".join(n[:-i]))
+            i += 1
+    dirs = {}
+    for old_dir, new_dirs in candidates.items():
+        [new_dir] = new_dirs if len(new_dirs) == 1 else [None]
+        under = [(o, n) for o, n in moved.items() if o.startswith(old_dir + "/")]
+        # Not when something moved into it: then it's still there.
+        if new_dir and not any(n.startswith(old_dir + "/") for n in moved.values()) and all(
+            n == new_dir + o[len(old_dir):] for o, n in under
+        ):
+            dirs[old_dir] = new_dir
+    return dirs
+
+
+def rewrite_paths(text: str, moved: dict[str, str]) -> str:
+    """`text` with every repo path a rename moved (and every directory it
+    moved whole) spelled at its new place."""
+    mapping = {**moved_dirs(moved), **moved}
+    if not mapping:
+        return text
+    alternatives = "|".join(re.escape(p) for p in sorted(mapping, key=len, reverse=True))
+    pattern = rf"(?<![\w.-])(?:{alternatives})(?![\w-]|\.\w)"
+    return re.sub(pattern, lambda m: mapping[m[0]], text)
+
+
+def resolve_relative(text: str, path: str) -> str:
+    """`text`, a script at `path`, with each path it spells relative to its
+    own directory (SCRIPT_RELATIVE) written as the repo path it names, so a
+    script that moved and changed `$dir/../x` to `$dir/../../x` to keep
+    naming the same file reads the same."""
+    def repo_path(m):
+        found = os.path.normpath(Path(path).parent / m[1])
+        return m[0][:m.start(1) - m.start(0)] + "{repo}/" + Path(found).as_posix()
+    return SCRIPT_RELATIVE.sub(repo_path, text)
+
+
+def same_recipe(old_text: str, old_path: str, new_text: str, new_path: str,
+                moved: dict[str, str]) -> bool:
+    """Whether a build input at `new_path` is its base version at
+    `old_path` with nothing changed but where the files it names are: old
+    paths rewritten to where they moved (per `moved`), and paths relative to
+    a moved script adjusted to name the same files. A manifest is compared
+    as TOML data, so its comments don't count; everything else as text."""
+    old = rewrite_paths(resolve_relative(old_text, old_path), moved)
+    new = resolve_relative(new_text, new_path)
+    if new_path.endswith(".toml"):
+        try:
+            return tomllib.loads(old) == tomllib.loads(new)
+        except tomllib.TOMLDecodeError:
+            return False
+    return old == new
 
 
 def git(root: Path, *args: str, check: bool = True) -> str | None:
