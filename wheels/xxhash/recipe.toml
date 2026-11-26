@@ -1,0 +1,14 @@
+# xxhash: one C extension (src/_xxhash.c plus the bundled xxHash 0.8.4),
+# built by setuptools with the default `pip wheel` build. setup.py only adds
+# the x86 dispatcher (xxh_x86dispatch.c) when sysconfig names an x86
+# platform, so for WASI it builds xxHash's portable scalar code.
+# meth-noargs.patch fixes the METH_NOARGS method signatures, which
+# WebAssembly's type-checked indirect calls trap on.
+name = "xxhash"
+version = "4.1.0"
+sdist = "https://files.pythonhosted.org/packages/c9/b5/3d11d3830ace56d67ea83136c24385c3b07da5a9bc62b73b0b94ac096da3/xxhash-4.1.0.tar.gz"
+sha256 = "c9b288e4c1f5dae54417bc8a05e6f6daf505783d916b4783f4dd2f2e7d5db486"
+# Installed in the build's venv
+requires = ["setuptools>=70.1"]
+# Imported in eryx after the build, so a module that doesn't load fails it
+imports = ["xxhash", "xxhash._xxhash"]

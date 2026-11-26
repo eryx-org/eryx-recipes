@@ -1,0 +1,67 @@
+METH_NOARGS methods are called as f(self, NULL), but _xxhash.c defines
+them as f(self). That's fine on native ABIs, but WebAssembly checks the
+type of every indirect call, so calling digest() and the rest traps with
+"indirect call type mismatch". Give them the two-parameter signature.
+
+--- a/src/_xxhash.c
++++ b/src/_xxhash.c
+@@ -890 +890 @@
+-static PyObject *PYXXH32_digest(PYXXH32Object *self)
++static PyObject *PYXXH32_digest(PYXXH32Object *self, PyObject *Py_UNUSED(ignored))
+@@ -909 +909 @@
+-static PyObject *PYXXH32_hexdigest(PYXXH32Object *self)
++static PyObject *PYXXH32_hexdigest(PYXXH32Object *self, PyObject *Py_UNUSED(ignored))
+@@ -940 +940 @@
+-static PyObject *PYXXH32_intdigest(PYXXH32Object *self)
++static PyObject *PYXXH32_intdigest(PYXXH32Object *self, PyObject *Py_UNUSED(ignored))
+@@ -953 +953 @@
+-static PyObject *PYXXH32_copy(PYXXH32Object *self)
++static PyObject *PYXXH32_copy(PYXXH32Object *self, PyObject *Py_UNUSED(ignored))
+@@ -982 +982 @@
+-static PyObject *PYXXH32_reset(PYXXH32Object *self)
++static PyObject *PYXXH32_reset(PYXXH32Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1241 +1241 @@
+-static PyObject *PYXXH64_digest(PYXXH64Object *self)
++static PyObject *PYXXH64_digest(PYXXH64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1260 +1260 @@
+-static PyObject *PYXXH64_hexdigest(PYXXH64Object *self)
++static PyObject *PYXXH64_hexdigest(PYXXH64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1291 +1291 @@
+-static PyObject *PYXXH64_intdigest(PYXXH64Object *self)
++static PyObject *PYXXH64_intdigest(PYXXH64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1304 +1304 @@
+-static PyObject *PYXXH64_copy(PYXXH64Object *self)
++static PyObject *PYXXH64_copy(PYXXH64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1333 +1333 @@
+-static PyObject *PYXXH64_reset(PYXXH64Object *self)
++static PyObject *PYXXH64_reset(PYXXH64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1592 +1592 @@
+-static PyObject *PYXXH3_64_digest(PYXXH3_64Object *self)
++static PyObject *PYXXH3_64_digest(PYXXH3_64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1611 +1611 @@
+-static PyObject *PYXXH3_64_hexdigest(PYXXH3_64Object *self)
++static PyObject *PYXXH3_64_hexdigest(PYXXH3_64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1642 +1642 @@
+-static PyObject *PYXXH3_64_intdigest(PYXXH3_64Object *self)
++static PyObject *PYXXH3_64_intdigest(PYXXH3_64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1655 +1655 @@
+-static PyObject *PYXXH3_64_copy(PYXXH3_64Object *self)
++static PyObject *PYXXH3_64_copy(PYXXH3_64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1691 +1691 @@
+-static PyObject *PYXXH3_64_reset(PYXXH3_64Object *self)
++static PyObject *PYXXH3_64_reset(PYXXH3_64Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1950 +1950 @@
+-static PyObject *PYXXH3_128_digest(PYXXH3_128Object *self)
++static PyObject *PYXXH3_128_digest(PYXXH3_128Object *self, PyObject *Py_UNUSED(ignored))
+@@ -1969 +1969 @@
+-static PyObject *PYXXH3_128_hexdigest(PYXXH3_128Object *self)
++static PyObject *PYXXH3_128_hexdigest(PYXXH3_128Object *self, PyObject *Py_UNUSED(ignored))
+@@ -2000 +2000 @@
+-static PyObject *PYXXH3_128_intdigest(PYXXH3_128Object *self)
++static PyObject *PYXXH3_128_intdigest(PYXXH3_128Object *self, PyObject *Py_UNUSED(ignored))
+@@ -2032 +2032 @@
+-static PyObject *PYXXH3_128_copy(PYXXH3_128Object *self)
++static PyObject *PYXXH3_128_copy(PYXXH3_128Object *self, PyObject *Py_UNUSED(ignored))
+@@ -2068 +2068 @@
+-static PyObject *PYXXH3_128_reset(PYXXH3_128Object *self)
++static PyObject *PYXXH3_128_reset(PYXXH3_128Object *self, PyObject *Py_UNUSED(ignored))
