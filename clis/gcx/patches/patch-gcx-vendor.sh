@@ -64,3 +64,18 @@ for base in cmd/gcx/root/dev cmd/gcx/instrumentation/local internal/style/glamou
     sed -i '1s|^//go:build !wasip1$|//go:build !wasip1 \&\& !wasip3|' "$base.go"
 done
 
+
+echo "=== Telemetry off by default ==="
+# gcx's usage telemetry is opt-out: it posts an event unless GCX_TELEMETRY,
+# DO_NOT_TRACK or its config turns it off. In eryx a sandbox shouldn't phone
+# home unasked, and reaching the receiver needs a network rule for it anyway,
+# so here it's opt-in: GCX_TELEMETRY=enabled still turns it on. Fails if the
+# default moves, so a new version can't skip this.
+f=internal/telemetry/telemetry.go
+if ! grep -qx 'const defaultMode = ModeDisabled' "$f"; then
+    if [ "$(grep -cx 'const defaultMode = ModeEnabled' "$f")" != 1 ]; then
+        echo "$f: no single 'const defaultMode = ModeEnabled' to change" >&2
+        exit 1
+    fi
+    sed -i 's|^const defaultMode = ModeEnabled$|const defaultMode = ModeDisabled|' "$f"
+fi
