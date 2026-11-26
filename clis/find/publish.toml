@@ -1,0 +1,3 @@
+version = "0.11.0-r.4"
+# Its onig crate compiles Oniguruma's C with the WASI SDK's clang.
+pins = ["vars.wasi_sdk_version"]

@@ -1,0 +1,22 @@
+[[component]]
+name = "curl"
+version = "8.20.0 (a05f3497)"
+license = "curl"
+url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
+# Built with every optional library but mbedTLS off (clis/curl/curl.toml).
+files = ["third_party/licenses/curl-COPYING"]
+cli = "clis/curl/curl.toml"
+cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
+
+[[component]]
+name = "Mbed TLS"
+version = "3.6.6"
+# Dual-licensed Apache-2.0 OR GPL-2.0-or-later; we take it under
+# Apache-2.0. Its LICENSE carries both texts.
+license = "Apache-2.0"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
+# curl's TLS library, statically linked.
+files = ["third_party/licenses/mbedtls-LICENSE"]
+cli = "clis/curl/curl.toml"
+cli_dep = "mbedtls"
+cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"

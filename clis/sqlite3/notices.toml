@@ -1,0 +1,10 @@
+[[component]]
+name = "SQLite"
+version = "3.53.2"
+# The amalgamation and its shell are public domain; this is the blessing
+# their source carries in place of a licence.
+license = "blessing"
+url = "https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip"
+files = ["clis/sqlite3/licenses/sqlite-blessing.txt"]
+cli = "clis/sqlite3/sqlite3.toml"
+cli_sha256 = "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32"

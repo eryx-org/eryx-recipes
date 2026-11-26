@@ -160,13 +160,15 @@ def sha256_file(path: Path) -> str:
 def source_inputs(key: tuple[str, str], revision: str, workdir: Path) -> dict:
     """What command `key` was built from at `revision` of this repo: its
     recipe's build inputs (publish.build_inputs: the manifest, its patches,
-    shims and WIT, its lane's files) and its lane's mise.toml pins, read from
+    shims and WIT, the shared ones it names, its lane's files) and its lane's mise.toml pins, read from
     that commit, not the working tree."""
     tree = workdir / f"{key[1]}-tree-{revision}"
     tree.mkdir()
     with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", revision))) as tar:
         tar.extractall(tree, filter="data")
-    entry = publish.load_commands((tree / publish.COMMANDS).read_text())[key]
+    # publish.commands reads either layout, as `revision` may be from before
+    # clis/<name>/.
+    entry = publish.commands(tree)[key]
     rel = publish.manifest_path(key, entry)
     manifest = tomllib.loads((tree / rel).read_text())
     mise = tomllib.loads((tree / "mise.toml").read_text())

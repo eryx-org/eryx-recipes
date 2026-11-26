@@ -1,0 +1,11 @@
+[[component]]
+name = "The Go command (wasip3 fork)"
+version = "1.27.4 (d09b5e11)"
+license = "BSD-3-Clause"
+url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
+# Built from the fork's own tree (eryx-build's std_tool), with
+# clis/go/patches/go-wasip3.patch. Its vendored modules are listed from the
+# fork's src/vendor and src/cmd/vendor (scripts/notices.py, std_tool_modules).
+files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
+cli = "clis/go/go.toml"
+cli_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"

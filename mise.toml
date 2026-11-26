@@ -136,24 +136,28 @@ mise where "$SPEC" >/dev/null 2>&1 || mise install "$SPEC"
 """
 
 [tasks.build-cli]
-description = "Build a command from clis/<name>.toml. Usage: mise run build-cli -- <name|path.toml>"
+description = "Build a command from its manifest (clis/<name>/<name>.toml). Usage: mise run build-cli -- <name|path.toml>"
 depends = ["install-eryx-build"]
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 NAME="${1:?Usage: mise run build-cli -- <name|path.toml> (e.g. rg, curl, gh)}"
+# eryx-build takes a name to mean clis/<name>.toml, so pass it the path.
+case "$NAME" in
+*.toml) MANIFEST="$NAME" ;;
+*) MANIFEST="$(python3 scripts/publish.py manifest "$NAME")" ;;
+esac
 # The C lane needs the WASI SDK. Export it if installed, but don't install it
 # for Rust and Go builds; C manifests point at ensure-wasi-sdk when it's missing.
 if SDK="$(mise where "github:WebAssembly/wasi-sdk@{{vars.wasi_sdk_version}}" 2>/dev/null)"; then
     export WASI_SDK_PATH="$SDK"
 fi
-scratch/tools/bin/eryx-build "$NAME"
+scratch/tools/bin/eryx-build "$MANIFEST"
 """
 
 [tasks.list-clis]
-description = "List the command manifests"
-depends = ["install-eryx-build"]
-run = "scratch/tools/bin/eryx-build --list"
+description = "List the commands and their manifests"
+run = "python3 scripts/publish.py list"
 
 [tasks.check-clis]
 description = "Validate the command manifests without building"
@@ -166,7 +170,7 @@ if [ -e clis/coreutils.toml ] && [ "$(cat scratch/fetched/coreutils_rev 2>/dev/n
     echo "clis/coreutils.toml wasn't fetched at vars.coreutils_rev; run mise run fetch-coreutils" >&2
     exit 1
 fi
-scratch/tools/bin/eryx-build --check
+python3 scripts/publish.py check-manifests --eryx-build scratch/tools/bin/eryx-build
 """
 
 [tasks.check-wit]
@@ -194,10 +198,11 @@ depends = ["ensure-rust-src"]
 run = "python3 scripts/notices.py check"
 
 [tasks.fetch-coreutils]
-description = "Fetch coreutils' recipe from eryx-org/eryx at vars.coreutils_rev into clis/ (git-ignored)"
+description = "Fetch coreutils' recipe from eryx-org/eryx at vars.coreutils_rev into clis/ (git-ignored), where eryx keeps it"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
+mkdir -p clis/patches
 for f in clis/coreutils.toml clis/patches/patch-uucore-wasip2.sh; do
     curl -fsSL -o "$f" "https://raw.githubusercontent.com/eryx-org/eryx/{{vars.coreutils_rev}}/$f"
 done
@@ -208,7 +213,7 @@ echo "{{vars.coreutils_rev}}" > scratch/fetched/coreutils_rev
 """
 
 [tasks.bump-coreutils]
-description = "Move vars.coreutils_rev to the newest eryx commit that changed coreutils' recipe, and bump its version. Usage: mise run bump-coreutils [-- BRANCH] (default multi-guest). A new upstream version also needs third_party/manual.toml's uutils entry (version, url, cli_commit) and its licence file updated by hand; notices-check fails until then"
+description = "Move vars.coreutils_rev to the newest eryx commit that changed coreutils' recipe, and bump its version. Usage: mise run bump-coreutils [-- BRANCH] (default multi-guest). A new upstream version also needs clis/coreutils/notices.toml's uutils entry (version, url, cli_commit) and its licence file updated by hand; notices-check fails until then"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail

@@ -1,0 +1,12 @@
+[[component]]
+name = "uutils diffutils"
+version = "0.6.0+main (feb8997e)"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/uutils/diffutils/tree/feb8997eeabbab58c31926ac3aaa1211189f4f4f"
+files = [
+    "clis/diffutils/licenses/diffutils-COPYRIGHT",
+    "clis/diffutils/licenses/diffutils-LICENSE-MIT",
+    "clis/diffutils/licenses/diffutils-LICENSE-APACHE",
+]
+cli = "clis/diffutils/diffutils.toml"
+cli_commit = "feb8997eeabbab58c31926ac3aaa1211189f4f4f"

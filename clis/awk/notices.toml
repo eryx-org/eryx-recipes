@@ -1,0 +1,9 @@
+[[component]]
+name = "The One True Awk"
+version = "20261106 (72e9b56c)"
+# Lucent's 1997 permission notice, which matches the SPDX SMLNJ template.
+license = "SMLNJ"
+url = "https://github.com/onetrueawk/awk/tree/72e9b56caddb4a6f8d1405315a5183c26b8650a4"
+files = ["clis/awk/licenses/awk-LICENSE"]
+cli = "clis/awk/awk.toml"
+cli_commit = "72e9b56caddb4a6f8d1405315a5183c26b8650a4"

@@ -46,7 +46,7 @@ cmake_flags = [
     "-DZLIB_BUILD_EXAMPLES=OFF",
 ]
 
-# TLS for libcurl, built as clis/curl.toml builds it.
+# TLS for libcurl, built as clis/curl/curl.toml builds it.
 [[deps]]
 name = "mbedtls"
 url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
@@ -57,7 +57,7 @@ license = "GPL-2.0-or-later"
 dir = "scratch/git-mbedtls"
 system = "cmake"
 include = "include"
-config_patch = "clis/patches/patch-mbedtls.sh"
+config_patch = "clis/shared/patches/patch-mbedtls.sh"
 cflags = [
     "-DMBEDTLS_NO_PLATFORM_ENTROPY",
     "-DMBEDTLS_ENTROPY_HARDWARE_ALT",
@@ -70,10 +70,11 @@ cmake_flags = [
     "-DUSE_STATIC_MBEDTLS_LIBRARY=ON",
     "-DUSE_SHARED_MBEDTLS_LIBRARY=OFF",
 ]
-shims = ["clis/shims/mbedtls-wasi.c"]
+shims = ["clis/shared/shims/mbedtls-wasi.c"]
 
-# libcurl, for git's HTTP(S) transport: the same curl as clis/curl.toml, as a
-# static library against the Mbed TLS above, trusting the child proxy's CA.
+# libcurl, for git's HTTP(S) transport: the same curl as clis/curl/curl.toml,
+# as a static library against the Mbed TLS above, trusting the child proxy's
+# CA.
 [[deps]]
 name = "curl"
 url = "https://github.com/curl/curl.git"
@@ -82,7 +83,7 @@ commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
 license = "curl"
 dir = "scratch/git-curl"
 system = "cmake"
-config_patch = "clis/patches/patch-curl.sh"
+config_patch = "clis/shared/patches/patch-curl.sh"
 cflags = [
     "-DPOLLPRI=0",
     "-D_WASI_EMULATED_SIGNAL",

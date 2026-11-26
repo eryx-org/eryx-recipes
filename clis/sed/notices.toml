@@ -1,0 +1,8 @@
+[[component]]
+name = "uutils sed"
+version = "0.3.0 (3b464d11)"
+license = "MIT"
+url = "https://github.com/uutils/sed/tree/3b464d115afddedf2271ff7b3d9564aa2103d752"
+files = ["clis/sed/licenses/sed-LICENSE"]
+cli = "clis/sed/sed.toml"
+cli_commit = "3b464d115afddedf2271ff7b3d9564aa2103d752"

@@ -1,0 +1,4 @@
+version = "0.6.0-r.2"
+# main after 0.6.0 (diffutils.toml), so not readable from source.ref
+upstream = "0.6.0"
+names = ["diff", "cmp"]

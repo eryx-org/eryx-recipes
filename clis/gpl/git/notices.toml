@@ -1,0 +1,54 @@
+[[component]]
+name = "Git"
+version = "2.56.1 (03b41523)"
+# git is GPL-2.0-only. Parts of it are under other licences, each with its
+# file: xdiff and compat/regex (LGPL-2.1), reftable (BSD-3-Clause) and sha1dc
+# (MIT). The source offer for the binary is the published command's (#6).
+license = "GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT"
+url = "https://github.com/git/git/tree/03b41523c576f26ad34085378717a0c1b287470f"
+files = [
+    "clis/gpl/git/licenses/git-COPYING",
+    "clis/gpl/git/licenses/git-LGPL-2.1",
+    "clis/gpl/git/licenses/git-reftable-LICENSE",
+    "clis/gpl/git/licenses/git-sha1dc-LICENSE.txt",
+]
+cli = "clis/gpl/git/git.toml"
+cli_commit = "03b41523c576f26ad34085378717a0c1b287470f"
+
+[[component]]
+name = "zlib"
+version = "1.3.1"
+license = "Zlib"
+url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
+# git's compression library, statically linked.
+files = ["clis/gpl/git/licenses/zlib-LICENSE"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "zlib"
+cli_sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+
+[[component]]
+name = "libcurl"
+version = "8.20.0 (a05f3497)"
+license = "curl"
+url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
+# git's HTTP(S) transport, statically linked (the same curl as
+# clis/curl/curl.toml).
+files = ["third_party/licenses/curl-COPYING"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "curl"
+cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
+
+[[component]]
+name = "Mbed TLS"
+version = "3.6.6"
+# Dual-licensed Apache-2.0 OR GPL-2.0-or-later. In git we take it under
+# GPL-2.0-or-later: Apache-2.0 can't be combined with git's GPL-2.0-only code,
+# and GPL-2.0-or-later can (see clis/gpl/git/NOTICE.md). curl, which isn't
+# GPL, takes it under Apache-2.0 (above). Its LICENSE carries both texts.
+license = "GPL-2.0-or-later"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
+# libcurl's TLS library, statically linked into git.
+files = ["third_party/licenses/mbedtls-LICENSE"]
+cli = "clis/gpl/git/git.toml"
+cli_dep = "mbedtls"
+cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"

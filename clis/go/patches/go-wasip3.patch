@@ -1,0 +1,472 @@
+Patches to the wasip3 Go fork (scripts/bootstrap-go-wasip3.sh's commit) for
+Go's own commands, built by clis/go/go.toml, go-compile.toml, go-asm.toml and
+go-link.toml. Applied by clis/go/patches/patch-go.sh.
+
+- cmd/go runs compile, asm and link through eryx:process/run (a WASI command
+  can't start another), as go-compile, go-asm and go-link:
+  cmd/go/internal/work/exec_wasip3.go, and the binding in
+  internal/eryx/process.
+- internal/wasi: cabi_realloc allocates from an arena during that call. A Go
+  heap allocation while the host is in the middle of a long import can crash
+  the runtime when a GC cycle is under way.
+- cmd/internal/objabi: the tools' -V output names them compile, asm and link,
+  without the go- prefix, as cmd/go expects.
+- cmd/go's file locks are no-ops (WASI has none), and it keeps no telemetry
+  counters and starts no upload process.
+
+diff --git a/src/cmd/go/internal/lockedfile/internal/filelock/filelock_other.go b/src/cmd/go/internal/lockedfile/internal/filelock/filelock_other.go
+index b16709ed..97d54d5b 100644
+--- a/src/cmd/go/internal/lockedfile/internal/filelock/filelock_other.go
++++ b/src/cmd/go/internal/lockedfile/internal/filelock/filelock_other.go
+@@ -2,7 +2,7 @@
+ // Use of this source code is governed by a BSD-style
+ // license that can be found in the LICENSE file.
+ 
+-//go:build !unix && !windows
++//go:build !unix && !windows && !wasip3
+ 
+ package filelock
+ 
+diff --git a/src/cmd/go/internal/lockedfile/internal/filelock/filelock_wasip3.go b/src/cmd/go/internal/lockedfile/internal/filelock/filelock_wasip3.go
+new file mode 100644
+index 00000000..db911f26
+--- /dev/null
++++ b/src/cmd/go/internal/lockedfile/internal/filelock/filelock_wasip3.go
+@@ -0,0 +1,22 @@
++// Copyright 2026 The Go Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++//go:build wasip3
++
++package filelock
++
++// WASI has no file locks. Locking always succeeds.
++// ponytail: an eryx sandbox runs one go command at a time, so nothing
++// contends for GOCACHE or go.mod; real locks if that ever changes.
++
++type lockType int8
++
++const (
++	readLock = iota + 1
++	writeLock
++)
++
++func lock(f File, lt lockType) error { return nil }
++
++func unlock(f File) error { return nil }
+diff --git a/src/cmd/go/internal/work/buildid.go b/src/cmd/go/internal/work/buildid.go
+index 584c1ac6..b88efe5d 100644
+--- a/src/cmd/go/internal/work/buildid.go
++++ b/src/cmd/go/internal/work/buildid.go
+@@ -161,7 +161,7 @@ func (b *Builder) toolID(name string) string {
+ 		var stdout, stderr strings.Builder
+ 		cmd.Stdout = &stdout
+ 		cmd.Stderr = &stderr
+-		if err := cmd.Run(); err != nil {
++		if err := runCmd(cmd); err != nil {
+ 			if stderr.Len() > 0 {
+ 				os.Stderr.WriteString(stderr.String())
+ 			}
+diff --git a/src/cmd/go/internal/work/exec_other.go b/src/cmd/go/internal/work/exec_other.go
+new file mode 100644
+index 00000000..ebedcc5d
+--- /dev/null
++++ b/src/cmd/go/internal/work/exec_other.go
+@@ -0,0 +1,16 @@
++// Copyright 2026 The Go Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++//go:build !wasip3
++
++package work
++
++import (
++	"cmd/internal/pathcache"
++	"os/exec"
++)
++
++func lookTool(file string) (string, error) { return pathcache.LookPath(file) }
++
++func runCmd(cmd *exec.Cmd) error { return cmd.Run() }
+diff --git a/src/cmd/go/internal/work/exec_wasip3.go b/src/cmd/go/internal/work/exec_wasip3.go
+new file mode 100644
+index 00000000..fe3f9a8d
+--- /dev/null
++++ b/src/cmd/go/internal/work/exec_wasip3.go
+@@ -0,0 +1,89 @@
++// Copyright 2026 The Go Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style
++// license that can be found in the LICENSE file.
++
++//go:build wasip3
++
++package work
++
++import (
++	"fmt"
++	"go/build"
++	"internal/eryx/process"
++	wasi "internal/wasi"
++	"io"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++)
++
++// A WASI command can't start another one, so on wasip3 the go command runs
++// its tools through eryx:process/run, where eryx registers them as go-compile,
++// go-asm and go-link. Their stubs in the tool dir only satisfy base.ToolPath.
++
++// lookTool returns file: exec.LookPath always fails on wasm.
++func lookTool(file string) (string, error) { return file, nil }
++
++var runErrors = [...]string{"command not found", "spawn failed", "limit exceeded"}
++
++// runCmd runs cmd to completion, then writes what it printed to cmd.Stdout
++// and cmd.Stderr. It reads no stdin.
++func runCmd(cmd *exec.Cmd) error {
++	name := filepath.Base(cmd.Path)
++	if filepath.Dir(cmd.Path) == filepath.Clean(build.ToolDir) {
++		name = "go-" + name
++	}
++	env := cmd.Env
++	if env == nil {
++		env = os.Environ()
++	}
++	pairs := make([][2]string, 0, len(env))
++	for _, e := range env {
++		if k, v, ok := strings.Cut(e, "="); ok {
++			pairs = append(pairs, [2]string{k, v})
++		}
++	}
++	dir := cmd.Dir
++	if dir == "" {
++		dir = "."
++	}
++	dir, err := filepath.Abs(dir)
++	if err != nil {
++		return err
++	}
++	// run caps a child's stdout and stderr at 16 MiB each; the host writes
++	// them into the arena, as cabi_realloc can't use the Go heap mid-call.
++	wasi.UseArena(2*16<<20 + 64)
++	r := process.Run(name, cmd.Args[1:], pairs, dir, nil)
++	wasi.EndArena()
++	if r.IsErr() {
++		e := int(r.Err())
++		msg := fmt.Sprintf("error %d", e)
++		if e < len(runErrors) {
++			msg = runErrors[e]
++		}
++		return fmt.Errorf("running %s: %s", name, msg)
++	}
++	out := r.OK()
++	if err := copyOut(cmd.Stdout, out.Stdout); err != nil {
++		return err
++	}
++	if err := copyOut(cmd.Stderr, out.Stderr); err != nil {
++		return err
++	}
++	if out.Status != 0 {
++		return fmt.Errorf("exit status %d", out.Status)
++	}
++	return nil
++}
++
++func copyOut(w io.Writer, b wasi.ByteBuffer) error {
++	buf := make([]byte, b.Len)
++	b.CopyInto(buf)
++	if w == nil || len(buf) == 0 {
++		return nil
++	}
++	_, err := w.Write(buf)
++	return err
++}
+diff --git a/src/cmd/go/internal/work/shell.go b/src/cmd/go/internal/work/shell.go
+index ffb8f272..f41963a6 100644
+--- a/src/cmd/go/internal/work/shell.go
++++ b/src/cmd/go/internal/work/shell.go
+@@ -12,7 +12,6 @@ import (
+ 	"cmd/go/internal/load"
+ 	"cmd/go/internal/str"
+ 	"cmd/internal/par"
+-	"cmd/internal/pathcache"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+@@ -619,7 +618,7 @@ func (sh *Shell) runOut(dir string, env []string, cmdargs ...any) ([]byte, error
+ 	}
+ 
+ 	var buf bytes.Buffer
+-	path, err := pathcache.LookPath(cmdline[0])
++	path, err := lookTool(cmdline[0])
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -647,7 +646,7 @@ func (sh *Shell) runOut(dir string, env []string, cmdargs ...any) ([]byte, error
+ 
+ 	cmd.Env = append(cmd.Env, env...)
+ 	start := time.Now()
+-	err = cmd.Run()
++	err = runCmd(cmd)
+ 	if a != nil && a.json != nil {
+ 		aj := a.json
+ 		aj.Cmd = append(aj.Cmd, joinUnambiguously(cmdline))
+diff --git a/src/cmd/internal/objabi/flag.go b/src/cmd/internal/objabi/flag.go
+index ae56e2b0..87564c31 100644
+--- a/src/cmd/internal/objabi/flag.go
++++ b/src/cmd/internal/objabi/flag.go
+@@ -13,6 +13,7 @@ import (
+ 	"log"
+ 	"os"
+ 	"reflect"
++	"runtime"
+ 	"sort"
+ 	"strconv"
+ 	"strings"
+@@ -214,6 +215,11 @@ func (versionFlag) Set(s string) error {
+ 	name = name[strings.LastIndex(name, `/`)+1:]
+ 	name = name[strings.LastIndex(name, `\`)+1:]
+ 	name = strings.TrimSuffix(name, ".exe")
++	if runtime.GOOS == "wasip3" {
++		// eryx registers the tools as go-compile, go-asm and go-link; the go
++		// command expects their -V line to name them as compile, asm and link.
++		name = strings.TrimPrefix(name, "go-")
++	}
+ 
+ 	p := ""
+ 
+diff --git a/src/cmd/internal/telemetry/counter/counter.go b/src/cmd/internal/telemetry/counter/counter.go
+index 5cef0b00..60fc3ca6 100644
+--- a/src/cmd/internal/telemetry/counter/counter.go
++++ b/src/cmd/internal/telemetry/counter/counter.go
+@@ -9,6 +9,7 @@ package counter
+ import (
+ 	"flag"
+ 	"os"
++	"runtime"
+ 
+ 	"golang.org/x/telemetry/counter"
+ )
+@@ -21,6 +22,11 @@ func OpenCalled() bool { return openCalled }
+ // on the current platform (and does nothing otherwise).
+ func Open() {
+ 	openCalled = true
++	if runtime.GOOS == "wasip3" {
++		// An eryx sandbox's go keeps no counters: their files would land in
++		// the sandbox's home, and nothing can upload them.
++		return
++	}
+ 	counter.OpenDir(os.Getenv("TEST_TELEMETRY_DIR"))
+ }
+ 
+diff --git a/src/cmd/internal/telemetry/telemetry.go b/src/cmd/internal/telemetry/telemetry.go
+index ca84fe39..f704c7c8 100644
+--- a/src/cmd/internal/telemetry/telemetry.go
++++ b/src/cmd/internal/telemetry/telemetry.go
+@@ -13,6 +13,7 @@ package telemetry
+ 
+ import (
+ 	"os"
++	"runtime"
+ 
+ 	"cmd/internal/telemetry/counter"
+ 
+@@ -29,6 +30,10 @@ func MaybeParent() {
+ 	if !counter.OpenCalled() || !maybeChildCalled {
+ 		panic("MaybeParent must be called after OpenCounters and MaybeChild")
+ 	}
++	if runtime.GOOS == "wasip3" {
++		// The upload runs in a child process, which WASI can't start.
++		return
++	}
+ 	telemetry.Start(telemetry.Config{
+ 		Upload:       true,
+ 		TelemetryDir: os.Getenv("TEST_TELEMETRY_DIR"),
+diff --git a/src/internal/eryx/process/run.go b/src/internal/eryx/process/run.go
+new file mode 100644
+index 00000000..e63887ed
+--- /dev/null
++++ b/src/internal/eryx/process/run.go
+@@ -0,0 +1,89 @@
++// Code generated by witgen from eryx:process@0.1.0/run. DO NOT EDIT.
++//
++// Generated by internal/wasi/cmd/witgen from eryx-commands' wit/process.wit,
++// then one fix by hand: Run's env is [][2]string (a [2]string has the
++// canonical ABI layout of tuple<string, string> on wasm32), which witgen
++// generated as []int32.
++
++//go:build wasip3
++
++package process
++
++import (
++	wasi "internal/wasi"
++	"unsafe"
++)
++
++// Output represents the output record.
++type Output struct {
++	Status int32
++	Stdout wasi.ByteBuffer
++	Stderr wasi.ByteBuffer
++}
++
++// RunError represents the run-error enum.
++type RunError uint8
++
++const (
++	RunErrorCommandNotFound RunError = iota
++	RunErrorSpawnFailed
++	RunErrorLimitExceeded
++)
++
++// ResultOutputRunError wraps result<output, runerror> (24 bytes).
++// Uses inline storage — no heap allocation on return.
++type ResultOutputRunError struct {
++	_ [0]int64
++	b [24]byte
++}
++
++const ResultOutputRunErrorSize = 24
++
++func (r ResultOutputRunError) IsErr() bool { return r.b[0] != 0 }
++
++func (r ResultOutputRunError) Err() RunError {
++	if r.b[0] == 0 {
++		panic("ResultOutputRunError: result is ok")
++	}
++	return RunError(r.b[4])
++}
++
++func (r ResultOutputRunError) OK() Output {
++	if r.b[0] != 0 {
++		panic("ResultOutputRunError: result is err")
++	}
++	return Output{
++		Status: int32(*(*int32)(unsafe.Pointer(&r.b[4]))),
++		Stdout: wasi.ByteBuffer{Ptr: *(*int32)(unsafe.Pointer(&r.b[8])), Len: *(*int32)(unsafe.Pointer(&r.b[12]))},
++		Stderr: wasi.ByteBuffer{Ptr: *(*int32)(unsafe.Pointer(&r.b[16])), Len: *(*int32)(unsafe.Pointer(&r.b[20]))},
++	}
++}
++
++//go:wasmimport eryx:process/run@0.1.0 run
++//go:noescape
++func run(cmd0 int32, cmd1 int32, args0 int32, args1 int32, env0 int32, env1 int32, cwd0 int32, cwd1 int32, stdin0 int32, stdin1 int32, retptr unsafe.Pointer)
++
++func Run(cmd string, args []string, env [][2]string, cwd string, stdin []byte) ResultOutputRunError {
++	cmdPtr, cmdLen := wasi.StringToPtr(cmd)
++	var argsPtr int32
++	if len(args) > 0 {
++		argsPtr = int32(uintptr(unsafe.Pointer(unsafe.SliceData(args))))
++	}
++	var envPtr int32
++	if len(env) > 0 {
++		envPtr = int32(uintptr(unsafe.Pointer(unsafe.SliceData(env))))
++	}
++	cwdPtr, cwdLen := wasi.StringToPtr(cwd)
++	var stdinPtr int32
++	if len(stdin) > 0 {
++		stdinPtr = int32(uintptr(unsafe.Pointer(unsafe.SliceData(stdin))))
++	}
++	var result ResultOutputRunError
++	run(cmdPtr, cmdLen, argsPtr, int32(len(args)), envPtr, int32(len(env)), cwdPtr, cwdLen, stdinPtr, int32(len(stdin)), unsafe.Pointer(&result))
++	wasi.KeepAlive(cmd)
++	wasi.KeepAlive(args)
++	wasi.KeepAlive(env)
++	wasi.KeepAlive(cwd)
++	wasi.KeepAlive(stdin)
++	return result
++}
+diff --git a/src/internal/wasi/cm.go b/src/internal/wasi/cm.go
+index fd8fdc2b..23e794c4 100644
+--- a/src/internal/wasi/cm.go
++++ b/src/internal/wasi/cm.go
+@@ -167,6 +167,13 @@ func cabiRealloc(oldPtr, oldSize, align, newSize int32) int32 {
+ 	if CabiUseStatic {
+ 		return staticRealloc(oldPtr, oldSize, newSize)
+ 	}
++	if arenaOn {
++		if p := arenaRealloc(oldPtr, oldSize, newSize); p != 0 {
++			return p
++		}
++		// The heap is what the arena is for avoiding.
++		panic("cabi_realloc: the host returned more than the arena holds")
++	}
+ 
+ 	totalSize := int(reallocHeaderSize) + int(newSize)
+ 
+@@ -287,7 +294,7 @@ func FreeResult(ptr unsafe.Pointer) {
+ // Called automatically by [CopyString] and by generated list wrappers
+ // after data has been copied into Go-owned memory.
+ func FreeRealloc(ptr int32) {
+-	if ptr == 0 {
++	if ptr == 0 || inArena(ptr) {
+ 		return
+ 	}
+ 	headerPtr := uintptr(ptr) - reallocHeaderSize
+@@ -338,3 +345,61 @@ func IsReturned(status int32) bool {
+ func Subtask(status int32) int32 {
+ 	return status >> HandleShift
+ }
++
++// --- Arena for long host calls ---
++//
++// cabi_realloc normally allocates on the Go heap. That's unsafe when the host
++// calls it in the middle of a long import (eryx:process/run, which runs a
++// whole child command): if a GC cycle is under way, the allocation may assist
++// or switch goroutines, which the wasm port can't do with the host's frame
++// on the stack. Callers of such imports bracket them with UseArena and
++// EndArena, and cabi_realloc bump-allocates from a buffer allocated up front.
++
++var (
++	arena    []byte
++	arenaOff int
++	arenaOn  bool
++)
++
++// UseArena makes cabi_realloc allocate from an arena of at least size bytes
++// until EndArena. The arena is allocated once and reused; what was allocated
++// from it last time must have been copied out.
++func UseArena(size int) {
++	if len(arena) < size {
++		arena = make([]byte, size)
++	}
++	arenaOff = 0
++	arenaOn = true
++}
++
++// EndArena makes cabi_realloc allocate on the Go heap again. Buffers from the
++// arena stay valid until the next UseArena.
++func EndArena() { arenaOn = false }
++
++func inArena(ptr int32) bool {
++	if len(arena) == 0 {
++		return false
++	}
++	base := uintptr(unsafe.Pointer(unsafe.SliceData(arena)))
++	return uintptr(ptr) >= base && uintptr(ptr) < base+uintptr(len(arena))
++}
++
++// arenaRealloc bump-allocates [header | data] from the arena, 8-byte
++// aligned. It returns 0 if the arena is full: size it for the most the host
++// can return.
++func arenaRealloc(oldPtr, oldSize, newSize int32) int32 {
++	total := (int(reallocHeaderSize) + int(newSize) + 7) &^ 7
++	if arenaOff+total > len(arena) {
++		return 0
++	}
++	buf := arena[arenaOff : arenaOff+total]
++	arenaOff += total
++	*(*int32)(unsafe.Pointer(&buf[0])) = int32(total)
++	dataPtr := int32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))) + reallocHeaderSize)
++	if oldPtr != 0 && oldSize > 0 {
++		old := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(oldPtr))), oldSize)
++		copy(buf[reallocHeaderSize:], old)
++		FreeRealloc(oldPtr)
++	}
++	return dataPtr
++}

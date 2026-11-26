@@ -1,13 +1,20 @@
-# Third-party code in the published command components, listed in their
-# notices by scripts/notices.py: each command's own source and what it
-# statically links, and each lane's toolchain libraries. A Rust command's
-# crates (and its standard library's) come from cargo-about instead.
+# Third-party code in the published command components that isn't any one
+# command's, listed in their notices by scripts/notices.py: what each lane's
+# toolchain links. Each command's own entries (the tool and the libraries it
+# statically links, its [[deps]]) are in its clis/<name>/notices.toml, in the
+# same form but without `artifacts`: they go in that command's notices. A
+# Rust command's crates (and its standard library's) come from cargo-about
+# instead.
 #
 # Each entry:
 #   name, version, license (SPDX), url  - what it is
 #   files     - licence and notice texts, relative to the repo root, copied
-#               from the source at its pin
+#               from the source at its pin: a command's own in
+#               clis/<name>/licenses/, one several commands use in
+#               third_party/licenses/
 #   artifacts - the commands (manifest names) whose notices it goes in
+#   lanes     - or the lanes (manifests' `lang`) whose every command's
+#               notices it goes in
 #   cli, cli_commit / cli_sha256 - the manifest that builds it and its pin,
 #               which `check` compares; cli_dep names one of its [[deps]]
 #   rust_toolchain - code that comes with the Rust toolchain: the version,
@@ -20,307 +27,6 @@
 #   go_fork_commit - code from the wasip3 Go fork: the commit, which must be
 #               the one scripts/bootstrap-go-wasip3.sh builds; the version
 #               must start with that script's GO_WASIP3_REF
-
-# ---------------------------------------------------------------------------
-# The commands and their [[deps]]
-# ---------------------------------------------------------------------------
-
-[[component]]
-name = "ripgrep"
-version = "15.1.0 (af60c2de)"
-license = "Unlicense OR MIT"
-url = "https://github.com/BurntSushi/ripgrep/tree/af60c2de9d85e7f3d81c78601669468cf02dabab"
-files = [
-    "third_party/licenses/ripgrep-COPYING",
-    "third_party/licenses/ripgrep-LICENSE-MIT",
-    "third_party/licenses/ripgrep-UNLICENSE",
-]
-artifacts = ["rg"]
-cli = "clis/rg.toml"
-cli_commit = "af60c2de9d85e7f3d81c78601669468cf02dabab"
-
-[[component]]
-name = "uutils coreutils"
-version = "0.9.0 (840c36d3)"
-license = "MIT"
-url = "https://github.com/uutils/coreutils/tree/840c36d3964833e1dc107fcb9ade9c0ad63076c0"
-files = ["third_party/licenses/coreutils-LICENSE"]
-artifacts = ["coreutils"]
-# Fetched from eryx-org/eryx (mise run fetch-coreutils).
-cli = "clis/coreutils.toml"
-cli_commit = "840c36d3964833e1dc107fcb9ade9c0ad63076c0"
-
-[[component]]
-name = "sd"
-version = "1.1.0 (4a7b2165)"
-license = "MIT"
-url = "https://github.com/chmln/sd/tree/4a7b216552d64134c0fa17a59b9d557d89019f0f"
-files = ["third_party/licenses/sd-LICENSE"]
-artifacts = ["sd"]
-cli = "clis/sd.toml"
-cli_commit = "4a7b216552d64134c0fa17a59b9d557d89019f0f"
-
-[[component]]
-name = "jaq"
-version = "3.1.2 (f7fea921)"
-license = "MIT"
-url = "https://github.com/01mf02/jaq/tree/f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"
-files = ["third_party/licenses/jaq-LICENSE-MIT"]
-artifacts = ["jaq"]
-cli = "clis/jaq.toml"
-cli_commit = "f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"
-
-[[component]]
-name = "jq"
-version = "1.8.2"
-# jq is MIT; its COPYING also covers the code it incorporates: David M. Gay's
-# dtoa, decNumber (ICU), Heimdal's thread and list code and NetBSD's strptime
-# (both BSD-2-Clause). Its documentation (CC BY 3.0) isn't built.
-license = "MIT AND ICU AND dtoa AND BSD-2-Clause"
-url = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-1.8.2.tar.gz"
-files = ["third_party/licenses/jq-COPYING"]
-artifacts = ["jq"]
-cli = "clis/jq.toml"
-cli_sha256 = "71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af"
-
-[[component]]
-name = "Oniguruma"
-version = "6.9.10"
-license = "BSD-2-Clause"
-url = "https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz"
-# jq's regex library, statically linked.
-files = ["third_party/licenses/oniguruma-COPYING"]
-artifacts = ["jq"]
-cli = "clis/jq.toml"
-cli_dep = "onig"
-cli_sha256 = "2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05"
-
-[[component]]
-name = "uutils sed"
-version = "0.3.0 (3b464d11)"
-license = "MIT"
-url = "https://github.com/uutils/sed/tree/3b464d115afddedf2271ff7b3d9564aa2103d752"
-files = ["third_party/licenses/sed-LICENSE"]
-artifacts = ["sed"]
-cli = "clis/sed.toml"
-cli_commit = "3b464d115afddedf2271ff7b3d9564aa2103d752"
-
-[[component]]
-name = "uutils diffutils"
-version = "0.6.0+main (feb8997e)"
-license = "MIT OR Apache-2.0"
-url = "https://github.com/uutils/diffutils/tree/feb8997eeabbab58c31926ac3aaa1211189f4f4f"
-files = [
-    "third_party/licenses/diffutils-COPYRIGHT",
-    "third_party/licenses/diffutils-LICENSE-MIT",
-    "third_party/licenses/diffutils-LICENSE-APACHE",
-]
-artifacts = ["diffutils"]
-cli = "clis/diffutils.toml"
-cli_commit = "feb8997eeabbab58c31926ac3aaa1211189f4f4f"
-
-[[component]]
-name = "uutils findutils"
-version = "0.11.0 (2cb3adea)"
-license = "MIT"
-url = "https://github.com/uutils/findutils/tree/2cb3adea013fbbe4c01750224183c95d8900416f"
-files = ["third_party/licenses/findutils-LICENSE"]
-artifacts = ["find"]
-cli = "clis/find.toml"
-cli_commit = "2cb3adea013fbbe4c01750224183c95d8900416f"
-
-[[component]]
-name = "Oniguruma (bundled in onig_sys 69.9.3)"
-version = "6.9.10"
-license = "BSD-2-Clause"
-url = "https://github.com/rust-onig/rust-onig/tree/main/onig_sys/oniguruma"
-# find's -regex library: the onig_sys crate (MIT, listed with the crates)
-# compiles the Oniguruma source it bundles into find. Its COPYING is the same
-# as jq's 6.9.10 release's. Update it with onig_sys in findutils' Cargo.lock.
-files = ["third_party/licenses/oniguruma-COPYING"]
-artifacts = ["find"]
-
-[[component]]
-name = "The One True Awk"
-version = "20261106 (72e9b56c)"
-# Lucent's 1997 permission notice, which matches the SPDX SMLNJ template.
-license = "SMLNJ"
-url = "https://github.com/onetrueawk/awk/tree/72e9b56caddb4a6f8d1405315a5183c26b8650a4"
-files = ["third_party/licenses/awk-LICENSE"]
-artifacts = ["awk"]
-cli = "clis/awk.toml"
-cli_commit = "72e9b56caddb4a6f8d1405315a5183c26b8650a4"
-
-[[component]]
-name = "curl"
-version = "8.20.0 (a05f3497)"
-license = "curl"
-url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
-# Built with every optional library but mbedTLS off (clis/curl.toml).
-files = ["third_party/licenses/curl-COPYING"]
-artifacts = ["curl"]
-cli = "clis/curl.toml"
-cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
-
-[[component]]
-name = "Mbed TLS"
-version = "3.6.6"
-# Dual-licensed Apache-2.0 OR GPL-2.0-or-later; we take it under
-# Apache-2.0. Its LICENSE carries both texts.
-license = "Apache-2.0"
-url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
-# curl's TLS library, statically linked.
-files = ["third_party/licenses/mbedtls-LICENSE"]
-artifacts = ["curl"]
-cli = "clis/curl.toml"
-cli_dep = "mbedtls"
-cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
-
-[[component]]
-name = "Grafana CLI (gcx)"
-version = "1.9.0 (7893f846)"
-license = "Apache-2.0"
-url = "https://github.com/grafana/gcx/tree/7893f846f459408daa347b8ab4d12c30324387c5"
-# Its Go modules are listed from its vendor tree (scripts/notices.py,
-# go_section).
-files = ["third_party/licenses/gcx-LICENSE"]
-artifacts = ["gcx"]
-cli = "clis/gcx.toml"
-cli_commit = "7893f846f459408daa347b8ab4d12c30324387c5"
-
-[[component]]
-name = "GitHub CLI"
-version = "2.87.3 (cf862d65)"
-license = "MIT"
-url = "https://github.com/cli/cli/tree/cf862d65df7f8ff528015e235c8cccd48cea286f"
-# Its Go modules are listed from its vendor tree (scripts/notices.py,
-# go_section), hashicorp/go-version (MPL-2.0, unmodified) among them.
-files = ["third_party/licenses/gh-LICENSE"]
-artifacts = ["gh"]
-cli = "clis/gh.toml"
-cli_commit = "cf862d65df7f8ff528015e235c8cccd48cea286f"
-
-[[component]]
-name = "The Go command (wasip3 fork)"
-version = "1.27.4 (d09b5e11)"
-license = "BSD-3-Clause"
-url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-# Built from the fork's own tree (eryx-build's std_tool), with
-# clis/patches/go-wasip3.patch. Its vendored modules are listed from the
-# fork's src/vendor and src/cmd/vendor (scripts/notices.py, std_tool_modules).
-files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
-artifacts = ["go"]
-cli = "clis/go.toml"
-cli_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-
-[[component]]
-name = "Go's compile tool (wasip3 fork)"
-version = "1.27.4 (d09b5e11)"
-license = "BSD-3-Clause"
-url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-# Built from the fork's own tree (eryx-build's std_tool), with
-# clis/patches/go-wasip3.patch. Its vendored modules are listed from the
-# fork's src/vendor and src/cmd/vendor (scripts/notices.py, std_tool_modules).
-files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
-artifacts = ["go-compile"]
-cli = "clis/go-compile.toml"
-cli_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-
-[[component]]
-name = "Go's asm tool (wasip3 fork)"
-version = "1.27.4 (d09b5e11)"
-license = "BSD-3-Clause"
-url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-# Built from the fork's own tree (eryx-build's std_tool), with
-# clis/patches/go-wasip3.patch. Its vendored modules are listed from the
-# fork's src/vendor and src/cmd/vendor (scripts/notices.py, std_tool_modules).
-files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
-artifacts = ["go-asm"]
-cli = "clis/go-asm.toml"
-cli_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-
-[[component]]
-name = "Go's link tool (wasip3 fork)"
-version = "1.27.4 (d09b5e11)"
-license = "BSD-3-Clause"
-url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-# Built from the fork's own tree (eryx-build's std_tool), with
-# clis/patches/go-wasip3.patch. Its vendored modules are listed from the
-# fork's src/vendor and src/cmd/vendor (scripts/notices.py, std_tool_modules).
-files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
-artifacts = ["go-link"]
-cli = "clis/go-link.toml"
-cli_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-
-[[component]]
-name = "SQLite"
-version = "3.53.2"
-# The amalgamation and its shell are public domain; this is the blessing
-# their source carries in place of a licence.
-license = "blessing"
-url = "https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip"
-files = ["third_party/licenses/sqlite-blessing.txt"]
-artifacts = ["sqlite3"]
-cli = "clis/sqlite3.toml"
-cli_sha256 = "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32"
-
-[[component]]
-name = "Git"
-version = "2.56.1 (03b41523)"
-# git is GPL-2.0-only. Parts of it are under other licences, each with its
-# file: xdiff and compat/regex (LGPL-2.1), reftable (BSD-3-Clause) and sha1dc
-# (MIT). The source offer for the binary is the published command's (#6).
-license = "GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT"
-url = "https://github.com/git/git/tree/03b41523c576f26ad34085378717a0c1b287470f"
-files = [
-    "third_party/licenses/git-COPYING",
-    "third_party/licenses/git-LGPL-2.1",
-    "third_party/licenses/git-reftable-LICENSE",
-    "third_party/licenses/git-sha1dc-LICENSE.txt",
-]
-artifacts = ["git"]
-cli = "clis/gpl/git/git.toml"
-cli_commit = "03b41523c576f26ad34085378717a0c1b287470f"
-
-[[component]]
-name = "zlib"
-version = "1.3.1"
-license = "Zlib"
-url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
-# git's compression library, statically linked.
-files = ["third_party/licenses/zlib-LICENSE"]
-artifacts = ["git"]
-cli = "clis/gpl/git/git.toml"
-cli_dep = "zlib"
-cli_sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
-
-[[component]]
-name = "libcurl"
-version = "8.20.0 (a05f3497)"
-license = "curl"
-url = "https://github.com/curl/curl/tree/a05f34973e6c4bb629d018f7cb51487be1c904d8"
-# git's HTTP(S) transport, statically linked (the same curl as clis/curl.toml).
-files = ["third_party/licenses/curl-COPYING"]
-artifacts = ["git"]
-cli = "clis/gpl/git/git.toml"
-cli_dep = "curl"
-cli_commit = "a05f34973e6c4bb629d018f7cb51487be1c904d8"
-
-[[component]]
-name = "Mbed TLS"
-version = "3.6.6"
-# Dual-licensed Apache-2.0 OR GPL-2.0-or-later. In git we take it under
-# GPL-2.0-or-later: Apache-2.0 can't be combined with git's GPL-2.0-only code,
-# and GPL-2.0-or-later can (see clis/gpl/git/NOTICE.md). curl, which isn't
-# GPL, takes it under Apache-2.0 (above). Its LICENSE carries both texts.
-license = "GPL-2.0-or-later"
-url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2"
-# libcurl's TLS library, statically linked into git.
-files = ["third_party/licenses/mbedtls-LICENSE"]
-artifacts = ["git"]
-cli = "clis/gpl/git/git.toml"
-cli_dep = "mbedtls"
-cli_sha256 = "8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a"
 
 # ---------------------------------------------------------------------------
 # What each lane links (LANE_ENTRIES in scripts/notices.py)
@@ -344,7 +50,7 @@ files = [
     "third_party/licenses/wasi-libc-musl-fts-COPYING",
 ]
 wasi_sdk = "wasi-sdk-33"
-artifacts = ["jq", "curl", "sqlite3", "awk", "git"]
+lanes = ["c"]
 
 [[component]]
 name = "LLVM compiler-rt builtins (WASI SDK)"
@@ -354,7 +60,7 @@ url = "https://github.com/llvm/llvm-project/tree/4434dabb69916856b824f68a64b029c
 # clang links libclang_rt.builtins into every wasm program it builds.
 files = ["third_party/licenses/llvm-compiler-rt-LICENSE.TXT"]
 wasi_sdk = "wasi-sdk-33"
-artifacts = ["jq", "curl", "sqlite3", "awk", "git"]
+lanes = ["c"]
 
 [[component]]
 name = "wasi-libc (Rust's wasm targets)"
@@ -379,7 +85,7 @@ files = [
 ]
 rust_toolchain = "1.100.0"
 sysroot_strings = { paths = ["lib/rustlib/wasm32-wasip2/lib/self-contained/libc.a"], strings = ["llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141"] }
-artifacts = ["rg", "sd", "jaq", "sed", "find", "diffutils", "coreutils"]
+lanes = ["rust"]
 
 [[component]]
 name = "The Rust standard library"
@@ -398,7 +104,7 @@ files = [
     "third_party/licenses/rust-Unicode-3.0.txt",
 ]
 rust_toolchain = "1.100.0"
-artifacts = ["rg", "sd", "jaq", "sed", "find", "diffutils", "coreutils"]
+lanes = ["rust"]
 
 [[component]]
 name = "The Go standard library (wasip3 fork)"
@@ -410,4 +116,4 @@ url = "https://github.com/sd2k/go/tree/d09b5e114a563faeda64feaeb6d1b0256ddc5641"
 # also cover go and its tools, built from the same fork.
 files = ["third_party/licenses/go-LICENSE", "third_party/licenses/go-PATENTS"]
 go_fork_commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
-artifacts = ["gcx", "gh", "go", "go-compile", "go-asm", "go-link"]
+lanes = ["go"]

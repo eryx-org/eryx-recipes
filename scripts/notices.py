@@ -5,8 +5,9 @@
     scripts/notices.py check                     # what CI's check job runs
     scripts/notices.py published NAME            # print yes or no
 
-A command's notices are the entries of third_party/manual.toml that list it
-(the tool, the libraries it links, and its toolchain's libc and runtime), and
+A command's notices are its own entries, in its clis/<name>/notices.toml (the
+tool and the libraries it links), and those of third_party/manual.toml that
+list it or its lane (its toolchain's libc and runtime), and
 for a Rust command, first, cargo-about's rendering of the crates it's built
 from (about.toml, third_party/about.hbs) and of its toolchain's standard
 library. For a Go command they're the Go modules it links: `go list -deps`
@@ -22,8 +23,8 @@ come from the toolchain's rust-src (`mise run ensure-rust-src`).
 `generate` also writes each command's SBOM, `<name>.spdx.json` (SPDX 2.3):
 the command, and every package its notices list, as packages it contains.
 
-`check` reads the manifests and manual.toml only, and fails, listing every
-failure, when:
+`check` reads the manifests and the notice entries only, and fails, listing
+every failure, when:
 - a published command, or one of its [[deps]], has no entry, or a command of
   a lane lacks that lane's toolchain entries (LANE_ENTRIES);
 - an entry is stale: a pin (commit or sha256) that no longer matches its
@@ -44,17 +45,16 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+import publish
+
 ROOT = Path(__file__).resolve().parent.parent
-MANUAL = ROOT / "third_party" / "manual.toml"
 TEMPLATE = ROOT / "third_party" / "about.hbs"
 STD_ABOUT = ROOT / "third_party" / "about-std.toml"
 MISE = ROOT / "mise.toml"
 
-# Every manifest: clis/*.toml and clis/gpl/<name>/<name>.toml, by name.
-COMMANDS = {
-    p.stem: str(p.relative_to(ROOT))
-    for p in sorted([*(ROOT / "clis").glob("*.toml"), *(ROOT / "clis" / "gpl").glob("*/*.toml")])
-}
+# Every command's publish.toml, and its manifest, by name.
+ENTRIES = {key[1]: entry for key, entry in publish.commands(ROOT).items()}
+COMMANDS = {key[1]: publish.manifest_path(key, entry) for key, entry in publish.commands(ROOT).items()}
 
 # Built and checked, but not published until their notices are complete.
 UNPUBLISHED = set()
@@ -94,9 +94,8 @@ STABLE = stable_toolchain()
 
 
 def published_version(name):
-    """Command `name`'s version in commands.toml (`<upstream>-r.<n>`)."""
-    namespace = "eryx-gpl" if COMMANDS[name].startswith("clis/gpl/") else "eryx"
-    return tomllib.loads((ROOT / "commands.toml").read_text())[namespace][name]["version"]
+    """Command `name`'s version, from its publish.toml (`<upstream>-r.<n>`)."""
+    return ENTRIES[name]["version"]
 
 
 def manifest(name):
@@ -104,7 +103,16 @@ def manifest(name):
 
 
 def components():
-    return tomllib.loads(MANUAL.read_text())["component"]
+    try:
+        return publish.notice_components(ROOT)
+    except publish.Error as e:
+        sys.exit(f"error: {e}")
+
+
+def listing(name):
+    """The notice entries that go in command `name`'s notices."""
+    lang = manifest(name)["lang"]
+    return [c for c in components() if publish.lists(c, name, lang)]
 
 
 def pinned_cargo_about():
@@ -426,7 +434,7 @@ def cli_about_args(artifact, required):
 
 
 def manual_section(artifact, sbom=None):
-    entries = [c for c in components() if artifact in c["artifacts"]]
+    entries = listing(artifact)
     if sbom is not None:
         # Not the tool's own entry: generate starts the SBOM with the tool.
         sbom += [spdx_package(c["name"], c["version"], c["license"], c["url"])
@@ -625,9 +633,9 @@ def generate(outdir, names):
         m = manifest(name)
         lang = m["lang"]
         source = m["source"]
-        # The command itself, as published (its commands.toml version and
+        # The command itself, as published (its publish.toml version and
         # the component built); what it statically links ([[deps]]) is in
-        # manual.toml.
+        # its notices.toml.
         component = ROOT / m["output"]["dir"] / "component.wasm"
         if not component.is_file():
             sys.exit(f"{name}: {component} isn't built; run `mise run build-cli -- {name}` first")
@@ -665,9 +673,12 @@ def check_manual():
     comps = components()
     mise = tomllib.loads(MISE.read_text())
     for c in comps:
-        for a in c["artifacts"]:
+        for a in c.get("artifacts", []):
             if a not in COMMANDS:
                 errors.append(f"{c['name']}: unknown command {a!r}")
+        for lane in c.get("lanes", []):
+            if lane not in LANE_ENTRIES:
+                errors.append(f"{c['name']}: unknown lane {lane!r}")
         for f in c["files"]:
             if not (ROOT / f).is_file():
                 errors.append(f"{c['name']}: missing licence file {f}")
@@ -702,17 +713,18 @@ def check_manual():
     for name in sorted(PUBLISHED):
         m = manifest(name)
         path = COMMANDS[name]
-        listing = [c for c in comps if name in c["artifacts"]]
-        if not any(c.get("cli") == path and "cli_dep" not in c for c in listing):
-            errors.append(f"{name}: no third_party/manual.toml entry for the tool ({path})")
+        listed = [c for c in comps if publish.lists(c, name, m["lang"])]
+        notices = f"{publish.command_dir(publish.find_command(ROOT, name)[0])}/{publish.NOTICES}"
+        if not any(c.get("cli") == path and "cli_dep" not in c for c in listed):
+            errors.append(f"{name}: no {notices} entry for the tool ({path})")
         for dep in m.get("deps", []):
-            if not any(c.get("cli") == path and c.get("cli_dep") == dep["name"] for c in listing):
-                errors.append(f"{name}: no third_party/manual.toml entry for its dependency {dep['name']} ({path})")
+            if not any(c.get("cli") == path and c.get("cli_dep") == dep["name"] for c in listed):
+                errors.append(f"{name}: no {notices} entry for its dependency {dep['name']} ({path})")
         if m["lang"] not in LANE_ENTRIES:
             errors.append(f"{name}: no notices for the {m['lang']} lane (LANE_ENTRIES)")
             continue
         for entry in LANE_ENTRIES[m["lang"]]:
-            if not any(c["name"] == entry for c in listing):
+            if not any(c["name"] == entry for c in listed):
                 errors.append(f"{name}: the {m['lang']} lane's {entry!r} entry doesn't list it")
     return errors
 

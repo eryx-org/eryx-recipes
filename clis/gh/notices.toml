@@ -1,0 +1,10 @@
+[[component]]
+name = "GitHub CLI"
+version = "2.87.3 (cf862d65)"
+license = "MIT"
+url = "https://github.com/cli/cli/tree/cf862d65df7f8ff528015e235c8cccd48cea286f"
+# Its Go modules are listed from its vendor tree (scripts/notices.py,
+# go_section), hashicorp/go-version (MPL-2.0, unmodified) among them.
+files = ["clis/gh/licenses/gh-LICENSE"]
+cli = "clis/gh/gh.toml"
+cli_commit = "cf862d65df7f8ff528015e235c8cccd48cea286f"

@@ -1,0 +1,6 @@
+# Go's own commands, from the wasip3 Go fork (clis/go/go.toml): go runs the
+# other three through eryx:process/run.
+version = "1.27.4-r.2"
+upstream = "1.27.4"
+# It writes the GOROOT go runs with, goroot.tar.gz, beside the component.
+files = ["scripts/go-root.sh"]
