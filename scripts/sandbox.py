@@ -219,7 +219,9 @@ def toolchain():
     if sdk and (Path(sdk) / "bin/clang").is_file():
         found["wasi-sdk"] = Path(sdk)
     # The toolchain dir itself (bin/rustc, lib/rustlib/<target>), not
-    # rustup's proxies, so nothing else of rustup's is needed
+    # rustup's proxies, so nothing else of rustup's is needed. The Rust and C
+    # lanes need its wasm32-wasip2 target, which eryx-build says if missing;
+    # the Go lane doesn't
     sysroot = mise("exec", "--", "rustc", "--print", "sysroot")
     if sysroot:
         sysroot = Path(sysroot).resolve()
@@ -227,8 +229,6 @@ def toolchain():
                                  capture_output=True, text=True).stdout
         if not version.startswith(f"rustc {pins['tools']['rust']['version']} "):
             sys.exit(f"{sysroot}'s rustc is {version.strip()!r}, not mise.toml's")
-        if not (sysroot / "lib/rustlib/wasm32-wasip2").is_dir():
-            sys.exit(f"{sysroot} has no wasm32-wasip2 target: run rustup target add wasm32-wasip2")
         found["rust"] = sysroot
     go = REPO / "scratch/go-wasip3"
     if (go / "bin/go").is_file():
