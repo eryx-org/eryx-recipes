@@ -64,17 +64,3 @@ for base in cmd/gcx/root/dev cmd/gcx/instrumentation/local internal/style/glamou
     sed -i '1s|^//go:build !wasip1$|//go:build !wasip1 \&\& !wasip3|' "$base.go"
 done
 
-echo "=== Trimming grafana-openapi-client-go's root client ==="
-# GrafanaHTTPAPI wires up every Grafana API service, about 18,000 functions,
-# and gcx only uses Health and SignedInUser through it. Drop the others'
-# imports, fields, constructors and SetTransport calls.
-perl -ni -e '
-    $keep = /\b(health|signed_in_user|Health|SignedInUser)\b/;
-    next if !$keep && (
-        m{^\s*"github\.com/grafana/grafana-openapi-client-go/client/\w+"$} ||
-        m{^\s*\w+ \w+ "github\.com/grafana/grafana-openapi-client-go/client/\w+"$} ||
-        m{^\s*cli\.\w+ = \w+\.New\(transport, formats\)$} ||
-        m{^\s*\w+ \w+\.ClientService$} ||
-        m{^\s*c\.\w+\.SetTransport\(transport\)$});
-    print;
-' "$V/github.com/grafana/grafana-openapi-client-go/client/grafana_http_api_client.go"

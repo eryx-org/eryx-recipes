@@ -8,8 +8,7 @@
 #
 # It builds for wasm32, whose code addresses fit about 61,000 functions, so
 # clis/gcx/patches/patch-gcx-vendor.sh leaves out what gcx's wasip1 build does
-# (`gcx dev`, otel-checker, glamour) and the Grafana API services gcx doesn't
-# call.
+# (`gcx dev`, otel-checker, glamour).
 #
 # At runtime gcx needs a real (non-symlinked) /etc/resolv.conf, a CA bundle
 # (SSL_CERT_FILE or certs under /etc), and the component-model async flags
@@ -22,8 +21,8 @@ lang = "go"
 
 [source]
 repo = "https://github.com/grafana/gcx.git"
-ref = "v1.9.0"
-commit = "7893f846f459408daa347b8ab4d12c30324387c5"
+ref = "v1.9.1"
+commit = "9e71d793a8e9b53b7d0ec605a9f41fd5493cdcce"
 dir = "scratch/gcx"
 
 [build]
@@ -31,7 +30,7 @@ package = "./cmd/gcx"
 # wasip3 stubs, build-constraint fixes and the trimming above.
 vendor_patch = "clis/gcx/patches/patch-gcx-vendor.sh"
 # main.commit is source.commit; main.date is fixed so builds don't vary by day.
-ldflags = "-s -X main.version={version} -X main.commit=7893f846f459408daa347b8ab4d12c30324387c5 -X main.date=1970-01-01T00:00:00Z"
+ldflags = "-s -X main.version={version} -X main.commit=9e71d793a8e9b53b7d0ec605a9f41fd5493cdcce -X main.date=1970-01-01T00:00:00Z"
 
 [build.go_toolchain]
 # The wasip3 Go fork to build with, overriding eryx-build's default pin
