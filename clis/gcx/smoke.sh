@@ -10,7 +10,7 @@ gcxw() {
         --env HOME=/home/gcx --env SSL_CERT_FILE=/etc/ca-certificates.crt \
         --env TERM=dumb "$@" 2>&1
 }
-expect "$(gcxw --env GCX_TELEMETRY=off "$OUT/component.wasm" --version)" "gcx version 1.9.0"
+expect "$(gcxw --env GCX_TELEMETRY=off "$OUT/component.wasm" --version)" "gcx version 1.9.1"
 # An unauthenticated request to a public Grafana: config loading, DNS, TCP
 # and TLS all work, and no secret is needed.
 expect "$(gcxw --env GCX_TELEMETRY=off --env GRAFANA_SERVER=https://play.grafana.org \
