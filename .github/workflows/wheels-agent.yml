@@ -139,14 +139,13 @@ jobs:
             --output-format json \
             --setting-sources project --strict-mcp-config --permission-mode dontAsk \
             --allowedTools "Read(./**)" "Read(//tmp/**)" "Glob(./**)" "Glob(//tmp/**)" \
-              "Grep(./**)" "Grep(//tmp/**)" \
-              "Edit(wheels/$PACKAGE/**)" "Write(wheels/$PACKAGE/**)" \
+              "Grep(./**)" "Grep(//tmp/**)" "Edit(wheels/$PACKAGE/**)" \
               "Bash(python3 wheels/build.py unpack:*)" \
               "Bash(python3 wheels/build.py build:*)" \
               "Bash(python3 wheels/build.py verify:*)" \
               "WebFetch(domain:pypi.org)" "WebFetch(domain:github.com)" \
               "WebFetch(domain:raw.githubusercontent.com)" \
-            --disallowedTools "Read(//proc/**)" "Glob(//proc/**)" "Grep(//proc/**)" \
+            --disallowedTools "Read(//proc/**)" "Grep(//proc/**)" \
             > "$RUNNER_TEMP/claude.json" || status=$?
           # What it cost (.github/claude/report.py), then the CLI's own status,
           # so running out of turns or budget fails the job and the failed job
