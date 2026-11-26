@@ -59,6 +59,8 @@ jobs:
       # Every lane's, as commands-agent.yml's agent gets them, so this tests
       # that setup too
       - uses: ./.github/actions/commands-toolchain
+        with:
+          wasip2-target: ${{ matrix.lane != 'go' }}
       # The build outside the sandbox needs what ci.yml's C lane installs
       - if: matrix.lane == 'c'
         run: sudo apt-get update && sudo apt-get install -y ninja-build bison

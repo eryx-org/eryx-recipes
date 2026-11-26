@@ -8,6 +8,12 @@ description: >-
 
 # sandbox.yml's builds and commands-agent.yml's agent, which doesn't know its
 # command's lane until it has written the manifest, so gets them all.
+inputs:
+  wasip2-target:
+    description: >-
+      Whether to add rustup's wasm32-wasip2 target. sandbox.yml leaves it out
+      for the Go lane, which builds without it, so that keeps being tested.
+    default: "true"
 runs:
   using: composite
   steps:
@@ -18,7 +24,8 @@ runs:
         install_args: rust aqua:bytecodealliance/wasmtime cargo:wasm-tools github:bytecodealliance/wit-bindgen
         cache: false
     - uses: ./.github/actions/eryx-build
-    - shell: bash
+    - if: inputs.wasip2-target == 'true'
+      shell: bash
       run: rustup target add wasm32-wasip2
     - shell: bash
       run: mise run ensure-wasi-sdk

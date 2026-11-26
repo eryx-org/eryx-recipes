@@ -196,6 +196,8 @@ jobs:
         with:
           name: recipe
           path: ${{ runner.temp }}/recipe/
+          # A fixture or config the agent tested with mustn't vanish here
+          include-hidden-files: true
           if-no-files-found: error
 
   pull-request:
@@ -248,6 +250,23 @@ jobs:
             echo "::error::The recipe is $size bytes"
             exit 1
           fi
+          # .gitignore (an allowlist, which keeps out *.pem, .env* and the
+          # like) would drop these from the commit without a word, so the
+          # PR wouldn't be what was built and tested
+          ignored=$(find "$dir" -type f | git -C "$GITHUB_WORKSPACE" check-ignore --no-index --stdin || true)
+          if [ -n "$ignored" ]; then
+            echo "::error::git would leave these out of the commit: $ignored"
+            exit 1
+          fi
+          # PR.md and CANNOT.md become the PR's body or a comment: within
+          # GitHub's 65,536-character limit (checked before anything is
+          # pushed), and mentioning nobody, as they're written from
+          # untrusted upstream text
+          for note in "$dir/PR.md" "$dir/CANNOT.md"; do
+            if [ -f "$note" ]; then
+              python3 -I -c 'import sys; p = sys.argv[1]; t = open(p, encoding="utf-8", errors="replace").read()[:60000]; open(p, "w", encoding="utf-8").write(t.replace("@", "@\u200b"))' "$note"
+            fi
+          done
           if [ ! -f "$dir/CANNOT.md" ] && ! grep -qE '^version = "[0-9]+\.[0-9]+\.[0-9]+-r\.1"$' "$dir/publish.toml" 2>/dev/null; then
             echo "::error::$dir/publish.toml has no version = \"<upstream>-r.1\""
             exit 1
