@@ -277,6 +277,21 @@ class CheckVersions(ScratchRepo):
         self.commit()
         self.assertEqual(self.problems(), [])
 
+    def test_a_branch_behind_its_base_is_judged_on_its_own_changes(self):
+        # curl 8.20.0-r.1 is published; this branch forks there, and only
+        # changes sd's smoke test, while its base moves on to curl r.2
+        self.write("commands.lock", publish.write_lock({"eryx:curl": {"8.20.0-r.1": "sha256:" + "a" * 64}}))
+        self.rebase_here()
+        fork = self.base
+        self.set_version("curl", "8.20.0-r.2")
+        self.commit()
+        main = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "-b", "pr", fork)
+        self.write("clis/sd/smoke.sh", "expect 1\n")
+        self.commit()
+        self.base = main
+        self.assertEqual(self.problems(), [])
+
     def test_its_version_notices_and_smoke_test_arent_build_inputs(self):
         self.write("clis/sd/smoke.sh", "expect 1\n")
         self.write("clis/sd/notices.toml", "")
