@@ -90,6 +90,24 @@ Go itself is four commands, built from the fork's own tree (eryx-build's `std_to
 - Don't set `GOFLAGS` in the sandbox. It replaces go.env's `-mod=vendor -trimpath -p=1` rather than adding to it, and without `-trimpath` the prebuilt cache never matches, so every build recompiles the standard library.
 - The archive isn't published or uploaded yet, because eryx can't mount it yet. CI builds it to smoke-test go, and caches it with go's component.
 
+### Building a command in the sandbox
+
+To build or test a recipe you haven't reviewed (an agent's, say), run eryx-build and the smoke test in a throwaway Docker container instead, with `scripts/sandbox.py` (wheels' `build.py --sandbox` uses it too):
+
+```sh
+dir=$(mise run build-cli -- sd --sandbox)   # prints /tmp/eryx-sandbox-.../sd-component
+clis/smoke.sh sd --sandbox --scratch "$(dirname "$dir")"
+mise run build-cli -- sd --sandbox --scratch /tmp/build-1   # a new directory of your choosing
+```
+
+- The build writes only its scratch directory, a new one (`--scratch`, by default a new one in `/tmp`), mounted read-write at the checkout's `scratch/`. That's where its manifest's `source.dir` and `output.dir` are, so the component is left in `<scratch>/<name>-component`, outside the checkout. Every build starts from nothing (no fetched sources or crates), so it takes as long as CI's.
+- The checkout is mounted read-only at its own path, so everything in it is readable to the build: keep nothing secret in it (a `.env`) when building recipes you haven't reviewed. The toolchains are mounted read-only from where this checkout's pins put them, never from paths in the arguments: eryx-build (`scratch/tools`), the pinned Rust toolchain (its rustup toolchain dir, with `wasm32-wasip2`), wasm-tools, wasmtime and wit-bindgen (mise), the WASI SDK, and the wasip3 Go fork in `scratch/go-wasip3`, each that's installed. Cargo's home is in the scratch directory, mounted where the host's `CARGO_HOME` is, so the paths the build records (crates' panic locations) match a build outside it: sd, jq and go-asm come out byte for byte the same.
+- Nothing else of the host's is mounted, not the Docker socket, and none of its environment is passed in, only what the build needs. The network is on. Root installs the image's packages (`ubuntu:26.04`, with what CI's runners give the C lane), and then the build and the smoke test run as your uid. Afterwards, every symlink the build left in the scratch directory is deleted, as something on the host could otherwise read where it points.
+- `smoke` mounts the scratch directory read-only, with wasmtime and wasm-tools.
+- It takes a command's name, not a manifest's path. go's `goroot.tar.gz` (`scripts/go-root.sh`) isn't written in the sandbox, so go's smoke test can't run there yet.
+
+With `RECIPES_REQUIRE_SANDBOX` set, as the agents run, `build-cli` and `clis/smoke.sh` refuse to run without `--sandbox`, a `--scratch` to build in must be a new directory directly in `/tmp`, and one to smoke-test must be a directory directly in `/tmp`, not a link. wheels/build.py's build and verify follow the same rules ([wheels/README.md](wheels/README.md#requests)). The Sandbox workflow (`.github/workflows/sandbox.yml`) builds sd, jq and go-asm and a wheel that way when the sandbox changes, and weekly, and checks the commands against a build outside it.
+
 ## Publishing
 
 Each command's version is in its `publish.toml`: `<upstream>-r.<n>`. Its name is its directory's, and its namespace `eryx`, or `eryx-gpl` under `clis/gpl/`, so `clis/rg/publish.toml` is `eryx:rg`'s, published as `ghcr.io/eryx-org/commands/eryx/rg:<version>`. It has:

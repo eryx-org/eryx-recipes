@@ -16,10 +16,10 @@ name: Wheels agent
 #   id-token. Its tools are reading the checkout and /tmp (not /proc, so not
 #   its own environment), editing only wheels/<package>/, fetching from PyPI
 #   and GitHub, and `wheels/build.py unpack|build|verify`. With
-#   WHEELS_REQUIRE_SANDBOX, build.py only builds and verifies in its sandbox
-#   (a container with none of this job's environment), mounts nothing of the
-#   host's there but the toolchain and new directories in /tmp, and only
-#   fetches sdists from files.pythonhosted.org.
+#   RECIPES_REQUIRE_SANDBOX, build.py only builds and verifies in its sandbox
+#   (scripts/sandbox.py: a container with none of this job's environment),
+#   mounts nothing of the host's there but the toolchain and new directories
+#   in /tmp, and only fetches sdists from files.pythonhosted.org.
 # - `pull-request` takes only wheels/<package>/ from it, and opens the PR (or
 #   comments on the issue) with GITHUB_TOKEN. No agent or package code runs
 #   there.
@@ -93,7 +93,7 @@ jobs:
       - name: Write the recipe
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          WHEELS_REQUIRE_SANDBOX: "1"
+          RECIPES_REQUIRE_SANDBOX: "1"
           WASI_SDK_PATH: ${{ steps.toolchain.outputs.wasi-sdk }}
           SYSROOT: ${{ steps.toolchain.outputs.sysroot }}
           PACKAGE: ${{ steps.issue.outputs.package }}

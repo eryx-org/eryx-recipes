@@ -96,9 +96,9 @@ another). `wheels/build.py unpack wheels/markupsafe --out /tmp/src` unpacks a
 recipe's sdist to read, checked against its hash and as data only, without
 running any of it.
 Add `--sandbox` to `build` or `verify` to run it in a throwaway Docker
-container (`ubuntu:26.04` with `build-essential`) that has only the recipes,
-the toolchain and the output mounted: for building packages you haven't
-reviewed, as the agent does. A `build.sh` that needs more (e.g. `rustup`)
+container (`scripts/sandbox.py`: `ubuntu:26.04` with `build-essential`) that
+has only the recipes, the toolchain and the output mounted: for building
+packages you haven't reviewed, as the agent does. A `build.sh` that needs more (e.g. `rustup`)
 installs it there.
 
 ## Requests
@@ -123,10 +123,12 @@ then ask for, so it's treated as hostile:
   environment), editing only `wheels/<package>/` (the name parsed from the
   issue's title), fetching from PyPI and GitHub, and `build.py unpack`,
   `build` and `verify`.
-- `WHEELS_REQUIRE_SANDBOX` makes `build.py` refuse to build or verify
+- `RECIPES_REQUIRE_SANDBOX` makes `build.py` refuse to build or verify
   without `--sandbox`, take `--out` (or `unpack`'s) only as a new directory
   directly in `/tmp`, and mount nothing else of the host's but the job's
-  sysroot, wasi-sdk, uv and eryx-precompile. sdists only come from
+  sysroot, wasi-sdk, uv and eryx-precompile (and `scripts/sandbox.py`, the
+  sandbox itself, which the commands' sandboxed builds share; see the
+  [top README](../README.md#building-a-command-in-the-sandbox)). sdists only come from
   `https://files.pythonhosted.org/`. So the package's code can't reach
   `build.py`, the agent's own files, the Docker socket or the environment.
 - A second job, with no agent and nothing of the package's running, takes
