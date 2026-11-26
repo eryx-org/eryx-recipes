@@ -35,7 +35,7 @@ pip download --dest wheels --only-binary :all: \
 
 [`wheels/README.md`](wheels/README.md#using-the-wheels-elsewhere) says what they need, and eryx's book covers [using them, with pip or uv](https://docs.eryx.run/latest/book/guide/packages.html).
 
-To ask for a command or package we don't build, [open an issue](https://github.com/eryx-org/eryx-recipes/issues).
+To ask for a command or package we don't build, [open an issue](https://github.com/eryx-org/eryx-recipes/issues) (for a command, titled `Command: <name>`: see [Requesting a command](#requesting-a-command)).
 
 ## Commands
 
@@ -107,6 +107,22 @@ mise run build-cli -- sd --sandbox --scratch /tmp/build-1   # a new directory of
 - It takes a command's name, not a manifest's path. go's `goroot.tar.gz` (`scripts/go-root.sh`) isn't written in the sandbox, so go's smoke test can't run there yet.
 
 With `RECIPES_REQUIRE_SANDBOX` set, as the agents run, `build-cli` and `clis/smoke.sh` refuse to run without `--sandbox`, a `--scratch` to build in must be a new directory directly in `/tmp`, and one to smoke-test must be a directory directly in `/tmp`, not a link. wheels/build.py's build and verify follow the same rules ([wheels/README.md](wheels/README.md#requests)). The Sandbox workflow (`.github/workflows/sandbox.yml`) builds sd, jq and go-asm and a wheel that way when the sandbox changes, and weekly, and checks the commands against a build outside it.
+
+## Requesting a command
+
+1. Open an issue titled exactly `Command: <name>`, the name it'll be published under (lowercase letters, digits and `-`), saying what the tool is and where its source is.
+2. A maintainer reads it and labels it `build-command`, which runs `.github/workflows/commands-agent.yml`. It stops unless the title is exactly that and neither `clis/<name>/` nor `clis/gpl/<name>/` exists.
+3. Claude writes `clis/<name>/` (or `clis/gpl/<name>/`, for a GPL-family licence), builds and smoke-tests it in the sandbox, and a draft PR titled `feat(commands): add <name>` is opened with it. If it can't be done, a comment on the issue says why. If the run fails, a comment links to it.
+4. Review the PR like any other: the recipe, its patches, its notices, and the licence and namespace it chose, which its description states for you to confirm. A GPL command also needs its licence and notice copied into its component the way ci.yml's step does for git, which only covers git so far.
+5. The Actions bot opened it, so its CI waits for a maintainer's **Approve and run**. Approve only once you've read the recipe, since CI builds it; that gives it its required checks. Then merge, and publish as usual.
+6. In eryx-run, once it's published: pin it in `shell-commands.lock` with `scripts/shell-commands-bump.py ghcr.io/eryx-org/commands/<namespace>/<name>`, decide in `src/execution/commands.rs` whether it gets the network or may spawn, and add its line to `the_shells_pinned_commands_all_run`.
+
+Anyone can open an issue, and the agent reads the issue's body and the upstream source, which anyone can publish, so both are treated as hostile. The label, which only maintainers can add, is the vouch. The run reads the issue as it was when labelled.
+
+- The agent's job has a read-only token, which it never sees (it runs the `claude` CLI, pinned with integrity hashes by `.github/claude/package-lock.json`, not claude-code-action), and no `id-token`. The issue's body reaches it as a file in `/tmp`, never in its prompt or a shell command, and the prompt says it's untrusted. Its tools are reading the checkout and `/tmp` (not `/proc`, so not its own environment), editing only `clis/<name>/` and `clis/gpl/<name>/` (the name parsed from the title), fetching from GitHub, crates.io, docs.rs and Go's module sites, `scripts/sandbox.py build-cli <name> --scratch ...` and `smoke <name> --scratch ...`, and `scripts/publish.py check-manifests` and `check-versions`, which only parse TOML (eryx-build's `--check` reads the manifests and checks the files they name exist).
+- `RECIPES_REQUIRE_SANDBOX` makes the build and smoke test run only in the sandbox ([above](#building-a-command-in-the-sandbox)), in a new directory directly in `/tmp`, with none of the job's environment, nothing of the host's mounted but the checkout and toolchains (read-only) and that directory, and no Docker socket or capabilities. So the source's code can't reach the scripts, the agent's files or its key.
+- A second job, with no agent and nothing of the recipe's running, takes only `clis/<name>/` or `clis/gpl/<name>/` (exactly one; regular files, at most 2 MB, nothing like an Anthropic key, and a `publish.toml` at `-r.1`), drops its `PR.md`, pushes it to a branch and opens the PR with `GITHUB_TOKEN`, or comments the agent's `CANNOT.md` on the issue.
+- Nothing it writes is published until the PR is reviewed and merged, and its CI doesn't run until a maintainer approves it.
 
 ## Publishing
 
