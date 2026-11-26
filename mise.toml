@@ -10,7 +10,7 @@ actionlint = "1.7.12"
 shellcheck = "0.11.0"
 # The wheels' builds (wheels/build.py): their venvs, and resolving recipes'
 # test requirements. CI installs this version with setup-uv.
-uv = "0.13.9"
+uv = "0.13.10"
 
 # Runs the commands' smoke tests. Keep it on the wasmtime version eryx uses,
 # so the commands are tested against the WASI versions eryx's host provides.
