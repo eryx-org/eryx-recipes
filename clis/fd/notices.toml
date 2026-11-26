@@ -1,0 +1,11 @@
+[[component]]
+name = "fd"
+version = "10.5.2 (b2a287b3)"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/sharkdp/fd/tree/b2a287b3993768e0ec52f0852916917f23fb2a38"
+files = [
+    "clis/fd/licenses/fd-LICENSE-MIT",
+    "clis/fd/licenses/fd-LICENSE-APACHE",
+]
+cli = "clis/fd/fd.toml"
+cli_commit = "b2a287b3993768e0ec52f0852916917f23fb2a38"

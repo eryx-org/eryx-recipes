@@ -1,0 +1,45 @@
+# Build manifest for fd (`fd`) as a WASI (wasip2) component, via the Rust
+# lane. Built by `mise run build-cli -- fd`.
+#
+# fd is a simple, fast alternative to `find`: it searches for entries by
+# name (regex by default, or --glob), respecting .gitignore / .ignore /
+# .fdignore and skipping hidden files unless told otherwise.
+#
+# wasip2 has no threads, and fd walks with ignore's parallel walker and
+# prints from a separate thread, so the patch walks sequentially on WASI
+# (see patches/patch-fd-wasi.sh). It also drops ctrlc, which has no WASI
+# backend. jemalloc doesn't build for wasm, so its feature (a default) is
+# off; shell completions (--gen-completions) are kept.
+#
+# --exec / --exec-batch / --list-details can't work: they run commands with
+# std::process, which WASI doesn't have, so each fails with an error.
+# WASI has no modes or owners: --owner isn't an option (it's unix-only, as is
+# --one-file-system), and `-t x` matches every file, as faccess's fallback
+# counts anything that exists as executable. -j is ignored (one thread).
+
+name = "fd"
+description = "fd — a simple, fast alternative to find, walking sequentially (Rust, wasip2)"
+# SPDX expression for the upstream source, recorded in provenance.json.
+license = "MIT OR Apache-2.0"
+lang = "rust"
+
+[source]
+repo = "https://github.com/sharkdp/fd.git"
+ref = "v10.5.2"
+commit = "b2a287b3993768e0ec52f0852916917f23fb2a38"
+# Local working copy the driver builds from; fetched on first build.
+dir = "scratch/fd"
+
+[build]
+# cargo binary to build → artifact is fd.wasm.
+bin = "fd"
+vendor_patch = "clis/fd/patches/patch-fd-wasi.sh"
+# No jemalloc (the default `use-jemalloc` feature): it doesn't build for wasm.
+cargo_flags = ["--no-default-features", "--features", "completions"]
+
+[cwasm]
+# Loaded as a plain component; the host compiles it on demand.
+enabled = false
+
+[output]
+dir = "scratch/fd-component"
