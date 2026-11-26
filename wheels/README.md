@@ -133,9 +133,12 @@ then ask for, so it's treated as hostile:
   only `wheels/<package>/` (regular files, at most 1 MB, nothing like an
   Anthropic key), pushes it to a
   branch and opens the PR with `GITHUB_TOKEN`, then runs `wheels.yml` on
-  the branch, as pushes with that token trigger nothing. That gives the PR
-  its required `Wheels result` check, but not `CI result`: close and reopen
-  the PR, which runs `ci.yml` for it.
+  the branch, as pushes with that token trigger nothing. The PR's own `CI` and
+  `Wheels` runs wait for a maintainer's approval, as runs on a PR from the
+  Actions bot do in a public repo: review the recipe, then approve them
+  ("Approve and run" on each run), which gives the PR its required `CI result`
+  and `Wheels result`. They build the recipe outside the sandbox (with a
+  read-only token and no secrets), which is why that's after review.
 
 ## Publishing
 
