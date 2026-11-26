@@ -1,0 +1,8 @@
+[[component]]
+name = "jaq"
+version = "3.1.2 (f7fea921)"
+license = "MIT"
+url = "https://github.com/01mf02/jaq/tree/f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"
+files = ["clis/jaq/licenses/jaq-LICENSE-MIT"]
+cli = "clis/jaq/jaq.toml"
+cli_commit = "f7fea9219d8d5364c91c6a0278765eaa0e6fa95e"

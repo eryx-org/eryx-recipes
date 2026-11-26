@@ -1,0 +1,12 @@
+[[component]]
+name = "ripgrep"
+version = "15.1.0 (af60c2de)"
+license = "Unlicense OR MIT"
+url = "https://github.com/BurntSushi/ripgrep/tree/af60c2de9d85e7f3d81c78601669468cf02dabab"
+files = [
+    "clis/rg/licenses/ripgrep-COPYING",
+    "clis/rg/licenses/ripgrep-LICENSE-MIT",
+    "clis/rg/licenses/ripgrep-UNLICENSE",
+]
+cli = "clis/rg/rg.toml"
+cli_commit = "af60c2de9d85e7f3d81c78601669468cf02dabab"

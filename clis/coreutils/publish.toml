@@ -1,0 +1,9 @@
+# The same build as eryx's embedded coreutils, from eryx's recipe
+# (eryx-commands#7).
+version = "0.9.0-r.4"
+multicall = true
+fetched = "coreutils_rev"
+# `mise run fetch-coreutils` fetches it, and its uucore patch
+# (clis/patches/patch-uucore-wasip2.sh, which it names), to where eryx keeps
+# them. Both are git-ignored.
+manifest = "clis/coreutils.toml"

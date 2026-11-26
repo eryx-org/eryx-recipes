@@ -1,0 +1,51 @@
+# Build manifest for the Go command (`go`), from the wasip3 Go fork itself
+# (eryx-build's `std_tool`), via the Go lane. Built by
+# `mise run build-cli -- go`, with the fork scripts/bootstrap-go-wasip3.sh
+# builds (or ERYX_GO_WASIP3_ROOT).
+#
+# A WASI command can't start another, so the patch
+# (clis/go/patches/go-wasip3.patch) has go run its tools through
+# eryx:process/run, as the commands go-compile, go-asm and go-link (clis/go-*/,
+# whose manifests use this one's patches); the host runs them only if it lets
+# go spawn (`Command::allow_spawn`). It builds
+# wasip3/wasm32 programs, one package at a time.
+#
+# At runtime go needs a GOROOT: the fork's standard library source, plus a
+# prebuilt standard library cache (scripts/go-root.sh writes both, as
+# goroot.tar.gz beside the component). Modules must be vendored: there's no
+# module proxy or VCS access (GOPROXY=off in its go.env).
+
+name = "go"
+description = "The Go command, building wasip3 programs with go-compile, go-asm and go-link (wasip3 Go fork)"
+# SPDX expression for the upstream source, recorded in provenance.json.
+license = "BSD-3-Clause"
+lang = "go"
+
+[source]
+# The fork at the commit the Go lane builds with: std_tool builds need both.
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-branches-notetsleepg"
+commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
+dir = "scratch/go-src"
+
+[build]
+package = "cmd/go"
+std_tool = true
+vendor_patch = "clis/go/patches/patch-go.sh"
+# The world go's eryx:process/run binding (internal/eryx/process) imports.
+wit = { path = "wit/process.wit", world = "eryx:process/child@0.1.0" }
+
+[build.go_toolchain]
+# The wasip3 Go fork to build with, overriding eryx-build's default pin
+# (GoToolchain::default) until the next vars.eryx_rev bump picks it up. Must
+# match scripts/bootstrap-go-wasip3.sh, which CI builds the toolchain with.
+repo = "https://github.com/sd2k/go.git"
+ref = "wasip3-0.3.0-go1.27.4-branches-notetsleepg"
+commit = "d09b5e114a563faeda64feaeb6d1b0256ddc5641"
+
+[cwasm]
+# Loaded as a plain component; the host compiles it on demand.
+enabled = false
+
+[output]
+dir = "scratch/go-component"

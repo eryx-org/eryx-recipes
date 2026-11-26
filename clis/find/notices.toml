@@ -1,0 +1,18 @@
+[[component]]
+name = "uutils findutils"
+version = "0.11.0 (2cb3adea)"
+license = "MIT"
+url = "https://github.com/uutils/findutils/tree/2cb3adea013fbbe4c01750224183c95d8900416f"
+files = ["clis/find/licenses/findutils-LICENSE"]
+cli = "clis/find/find.toml"
+cli_commit = "2cb3adea013fbbe4c01750224183c95d8900416f"
+
+[[component]]
+name = "Oniguruma (bundled in onig_sys 69.9.3)"
+version = "6.9.10"
+license = "BSD-2-Clause"
+url = "https://github.com/rust-onig/rust-onig/tree/main/onig_sys/oniguruma"
+# find's -regex library: the onig_sys crate (MIT, listed with the crates)
+# compiles the Oniguruma source it bundles into find. Its COPYING is the same
+# as jq's 6.9.10 release's. Update it with onig_sys in findutils' Cargo.lock.
+files = ["third_party/licenses/oniguruma-COPYING"]

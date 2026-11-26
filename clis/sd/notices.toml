@@ -1,0 +1,8 @@
+[[component]]
+name = "sd"
+version = "1.1.0 (4a7b2165)"
+license = "MIT"
+url = "https://github.com/chmln/sd/tree/4a7b216552d64134c0fa17a59b9d557d89019f0f"
+files = ["clis/sd/licenses/sd-LICENSE"]
+cli = "clis/sd/sd.toml"
+cli_commit = "4a7b216552d64134c0fa17a59b9d557d89019f0f"

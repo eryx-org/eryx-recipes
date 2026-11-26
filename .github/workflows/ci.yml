@@ -1,20 +1,21 @@
 # Build every command in clis/ with eryx-build (pinned in mise.toml) and
 # smoke-test it under the wasmtime CLI (clis/smoke.sh).
 #
-# Which lanes run when:
-# - Rust (rg, sd, jaq, sed, find, diffutils, and coreutils from eryx's
-#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gcx, gh, and go with its
-#   tools go-compile, go-asm and go-link): when the build pins
-#   (mise.toml), this workflow, smoke.sh, what the notices are made from, or
-#   one of the lane's manifests, patches, shims or WIT change.
+# Which commands build when (`scripts/publish.py matrix`, in the changes job,
+# reads every command's directory, so adding one needs nothing here):
+# - On pushes and PRs, each command whose directory (clis/<name>/) or other
+#   build inputs (shared patches, WIT, its lane's files) changed, in its
+#   manifest's lane (Rust, C or Go), and every command when what they all
+#   share does: the build pins (mise.toml), this workflow, its actions,
+#   clis/smoke.sh, publish.py, or what the notices are made from.
 # - Everything weekly, to catch upstream and toolchain bit-rot, and on demand.
 #
-# A lane running doesn't rebuild each of its commands. On pushes and PRs, each
+# A command building doesn't mean rebuilding it. On pushes and PRs, each
 # command's built component dir (component, cwasm, manifest, provenance,
 # notices, SBOM) is cached under a hash of everything it's made from
 # (`scripts/publish.py cache-key`): its recipe and the patches, shims and WIT
-# it names, the pinned eryx-build and toolchains, its commands.toml entry, its
-# third_party/manual.toml entries and their files, and the notices generator.
+# it names, the pinned eryx-build and toolchains, its publish.toml, its
+# notice entries and their files, and the notices generator.
 # On a hit the build is skipped, but the smoke test still runs, so a smoke.sh
 # change re-checks every command without rebuilding it. Bump the key's `v1`
 # for a change to this workflow's build steps that the hash doesn't see.
@@ -82,7 +83,6 @@ jobs:
     # in a private repo.
     permissions:
       contents: read
-      pull-requests: read
     outputs:
       # Where the build lanes run: the eryx-desktop runner (eryx-org/eryx-run's
       # scripts/desktop-runner) when the DESKTOP_RUNNER repo variable is `on`,
@@ -97,81 +97,36 @@ jobs:
         && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
         || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)))
         && '["self-hosted","eryx-desktop"]' || '"ubuntu-latest"' }}
-      rust: ${{ steps.filter.outputs.rust }}
-      c: ${{ steps.filter.outputs.c }}
-      go: ${{ steps.filter.outputs.go }}
+      # Each lane's commands to build, as a JSON list of {cli, wasi_sdk?}
+      # (`[]` skips the lane).
+      rust: ${{ steps.matrix.outputs.rust }}
+      c: ${{ steps.matrix.outputs.c }}
+      go: ${{ steps.matrix.outputs.go }}
     steps:
-      # On a push, paths-filter diffs against the push's before commit, and
-      # fetches it if it isn't here; without credentials that fetch fails in a
-      # private repo. Full history means it's always here. PRs use the API.
+      # The matrix diffs against the PR's base or the push's before commit,
+      # so it needs them here: full history.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: filter
-        with:
-          filters: |
-            # eryx-build, the toolchains and the WIT are pinned in mise.toml.
-            driver: &driver
-              - 'clis/smoke.sh'
-              - 'mise.toml'
-              - '.github/workflows/ci.yml'
-              # The commands' own actions, not wheels-toolchain (wheels.yml's)
-              - '.github/actions/eryx-build/**'
-              - '.github/actions/setup-binstall/**'
-              # The cache key, and each command's version (in its SBOM).
-              - 'scripts/publish.py'
-              - 'commands.toml'
-              # What each command's notices are made from.
-              - 'scripts/notices.py'
-              - 'about.toml'
-              - 'third_party/**'
-            rust:
-              - *driver
-              - 'clis/rg.toml'
-              - 'clis/sd.toml'
-              - 'clis/jaq.toml'
-              - 'clis/patches/patch-sd-wasip2.sh'
-              - 'clis/patches/patch-jaq-wasip2.sh'
-              - 'clis/sed.toml'
-              - 'clis/find.toml'
-              - 'clis/patches/patch-sed.sh'
-              - 'clis/patches/sed-wasi.patch'
-              - 'clis/patches/patch-find.sh'
-              - 'clis/patches/find-wasi.patch'
-              - 'clis/diffutils.toml'
-              - 'clis/patches/patch-diffutils.sh'
-              - 'clis/patches/diffutils-bundled-flags.patch'
-            c:
-              - *driver
-              - 'clis/curl.toml'
-              - 'clis/sqlite3.toml'
-              - 'clis/jq.toml'
-              - 'clis/awk.toml'
-              - 'clis/patches/patch-awk.sh'
-              - 'clis/patches/patch-curl.sh'
-              - 'clis/patches/patch-mbedtls.sh'
-              - 'clis/shims/**'
-              - 'clis/gpl/git/**'
-              # git's eryx:process/run bindings are generated from it.
-              - 'wit/**'
-            go:
-              - *driver
-              - 'clis/gcx.toml'
-              - 'clis/patches/patch-gcx-vendor.sh'
-              - 'clis/gh.toml'
-              - 'clis/patches/patch-gh-vendor.sh'
-              - 'clis/patches/gh-*.patch'
-              - 'scripts/bootstrap-go-wasip3.sh'
-              - 'clis/go.toml'
-              - 'clis/go-*.toml'
-              - 'clis/patches/patch-go.sh'
-              - 'clis/patches/go-wasip3.patch'
-              # The GOROOT go ships with (goroot.tar.gz).
-              - 'scripts/go-root.sh'
-              # go's eryx:process/run binding imports its world.
-              - 'wit/**'
+      - name: List the commands to build
+        id: matrix
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # The weekly and manual runs build everything: no base.
+          base=
+          case "$EVENT" in
+          pull_request) base="$PR_BASE" ;;
+          # A push that creates the branch has no before commit.
+          push) [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || base="$BEFORE" ;;
+          esac
+          # Into a file first: through a pipe, a failing matrix would leave
+          # the step green and the lanes' matrices empty
+          python3 scripts/publish.py matrix ${base:+--base "$base"} > "$RUNNER_TEMP/matrix"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/matrix"
 
   check:
     name: Check manifests
@@ -197,9 +152,9 @@ jobs:
       # The vendored eryx WIT matches eryx's at the pinned commit.
       - run: mise run check-wit
       - run: python3 -m unittest discover -s scripts
-      # Every recipe has a version in commands.toml, matching its upstream;
+      # Every recipe has a version in its publish.toml, matching its upstream;
       # on a PR, every command whose build inputs changed has a new one.
-      - name: Check commands.toml
+      - name: Check versions
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
         run: python3 scripts/publish.py check-versions ${BASE:+--base "$BASE"}
@@ -207,14 +162,14 @@ jobs:
   rust:
     name: Build ${{ matrix.cli }} (Rust lane)
     needs: changes
-    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true') }}
+    if: ${{ !inputs.sign_run_id && needs.changes.outputs.rust != '[]' }}
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:
-        # coreutils is built from eryx's recipe, fetched at vars.coreutils_rev
-        # in mise.toml (so the driver filter covers its pin).
-        cli: [rg, sd, jaq, sed, find, diffutils, coreutils]
+        # coreutils is among them, built from eryx's recipe, fetched at
+        # vars.coreutils_rev in mise.toml (so any change to its pin builds it).
+        include: ${{ fromJSON(needs.changes.outputs.rust) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -250,8 +205,9 @@ jobs:
         uses: ./.github/actions/eryx-build
       - if: steps.cache.outputs.cache-hit != 'true'
         run: rustup target add wasm32-wasip2
-      # find's onig crate compiles Oniguruma's C with the WASI SDK's clang.
-      - if: matrix.cli == 'find' && steps.cache.outputs.cache-hit != 'true'
+      # A command that pins the WASI SDK compiles C with its clang (find's onig
+      # crate compiles Oniguruma).
+      - if: matrix.wasi_sdk && steps.cache.outputs.cache-hit != 'true'
         run: mise run ensure-wasi-sdk
       - if: steps.cache.outputs.cache-hit != 'true'
         run: mise run build-cli -- "$CLI"
@@ -299,16 +255,14 @@ jobs:
   c:
     name: Build ${{ matrix.cli }} (C lane)
     needs: changes
-    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.c == 'true') }}
+    if: ${{ !inputs.sign_run_id && needs.changes.outputs.c != '[]' }}
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:
-        cli: [sqlite3, curl, jq, awk, git]
-        include:
-          # GPL recipes live apart, in clis/gpl/ (eryx-org/eryx#837).
-          - cli: git
-            manifest: clis/gpl/git/git.toml
+        # git among them: build-cli finds GPL recipes in clis/gpl/
+        # (eryx-org/eryx#837).
+        include: ${{ fromJSON(needs.changes.outputs.c) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -348,9 +302,9 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: mise run ensure-wasi-sdk
       - if: steps.cache.outputs.cache-hit != 'true'
-        run: mise run build-cli -- "$MANIFEST"
+        run: mise run build-cli -- "$CLI"
         env:
-          MANIFEST: ${{ matrix.manifest || matrix.cli }}
+          CLI: ${{ matrix.cli }}
       - run: clis/smoke.sh "$CLI"
         env:
           CLI: ${{ matrix.cli }}
@@ -399,14 +353,14 @@ jobs:
   go:
     name: Build ${{ matrix.cli }} (Go lane)
     needs: changes
-    if: ${{ !inputs.sign_run_id && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.go == 'true') }}
+    if: ${{ !inputs.sign_run_id && needs.changes.outputs.go != '[]' }}
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     strategy:
       fail-fast: false
       matrix:
         # go, go-compile, go-asm and go-link each build from their own
         # checkout of the fork (eryx-build's std_tool).
-        cli: [gcx, gh, go, go-compile, go-asm, go-link]
+        include: ${{ fromJSON(needs.changes.outputs.go) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

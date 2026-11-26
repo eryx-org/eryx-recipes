@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Write the GOROOT that the `go` command (clis/go.toml) needs at runtime, as
+# Write the GOROOT that the `go` command (clis/go/go.toml) needs at runtime, as
 # goroot.tar.gz in its component dir:
 #
 #   go/         the GOROOT: the patched fork's standard library source
@@ -30,7 +30,7 @@ GO="$GOROOT_TOOLCHAIN/bin/go"
 # commit, which is the toolchain's.
 [ "$(git -C "$SRC" rev-parse HEAD)" = "$(git -C "$GOROOT_TOOLCHAIN" rev-parse HEAD)" ] ||
     { echo "go-root: $SRC isn't at the toolchain's commit; build go first" >&2; exit 1; }
-PATCH="$(realpath "$(dirname "${BASH_SOURCE[0]}")/../clis/patches/go-wasip3.patch")"
+PATCH="$(realpath "$(dirname "${BASH_SOURCE[0]}")/../clis/go/patches/go-wasip3.patch")"
 git -C "$SRC" apply --check -R "$PATCH" 2>/dev/null ||
     { echo "go-root: $SRC isn't patched with go-wasip3.patch; build go first" >&2; exit 1; }
 

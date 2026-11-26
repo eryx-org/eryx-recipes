@@ -1,11 +1,38 @@
 #!/usr/bin/env python3
 """Version checks and registry publishing for the commands (#5).
 
+Each command is a directory, clis/<name>/ (clis/gpl/<name>/ for GPL ones,
+in the eryx-gpl namespace), with its manifest <name>.toml and its
+publish.toml: its version, and the other fields the README's Publishing
+section lists.
+
     publish.py check-versions [--base REF]
-        Check commands.toml against the recipes in clis/. With --base, also
-        check that every command whose build inputs changed since REF has a
-        new version, that a new upstream version starts again at r.1, and
-        that no version is lower than one commands.lock already has.
+        Check every command's publish.toml against its recipe. With --base,
+        also check that every command whose build inputs changed since REF
+        has a new version, that a new upstream version starts again at r.1,
+        and that no version is lower than one commands.lock already has.
+        Moving a build input, and rewriting the paths that name it, isn't a
+        change (same_recipe). REF may be from before clis/<name>/, when the
+        versions were all in commands.toml.
+
+    publish.py matrix [--base REF]
+        Print, for each lane, the commands CI builds, as a JSON list of
+        {"cli": NAME} (plus "wasi_sdk": true for a command that pins the WASI
+        SDK its lane doesn't install), one `<lane>=<list>` line each, for
+        $GITHUB_OUTPUT. Without --base, every command; with it, those whose
+        directory or build inputs changed since REF, and every command when
+        what they all share (DRIVER_FILES) changed.
+
+    publish.py manifest NAME
+        Print the path of command NAME's manifest.
+
+    publish.py list
+        Print every command's name and manifest.
+
+    publish.py check-manifests --eryx-build PATH
+        Run `eryx-build --check` over every command's manifest. eryx-build
+        only looks for them in clis/*.toml and clis/gpl/*/*.toml, so it runs
+        in a copy of the repo of symlinks with them there.
 
     publish.py publish --registry HOST [--insecure] [--fail-existing]
                        [--out RESULTS.json] COMPONENT_DIR...
@@ -25,11 +52,12 @@
     publish.py cache-key NAME
         Print a hash of everything a command's built component dir depends
         on, for CI's component cache: its build inputs (build_inputs) and its
-        notices' (NOTICE_FILES, its third_party/manual.toml entries and their
-        files, its commands.toml entry). Any change to them is a new key.
+        notices' (NOTICE_FILES, its notices.toml entries and the
+        third_party/manual.toml ones that list it, and their files), and its
+        publish.toml. Any change to them is a new key.
 
     publish.py bump NAMESPACE:NAME [--branch BRANCH]
-        For a recipe fetched from eryx (`fetched` in commands.toml): move its
+        For a recipe fetched from eryx (`fetched` in publish.toml): move its
         pin to the newest commit on BRANCH that changed the recipe or its
         vendor patch, and bump its version (back to r.1 for a new upstream).
 
@@ -52,13 +80,32 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-COMMANDS = "commands.toml"
+# Where every command's version was before clis/<name>/ (commands_at reads
+# it from an older commit).
+LEGACY_COMMANDS = "commands.toml"
+PUBLISH = "publish.toml"
+NOTICES = "notices.toml"
+# A command's publish.toml, and so its directory, namespace and name.
+COMMAND_DIR = re.compile(r"^clis/(?:(?P<gpl>gpl)/)?(?P<name>[^/]+)/publish\.toml$")
+# What's in a command's directory that isn't built from: its version, notices
+# and smoke test. Anything else there is a build input (build_inputs).
+NOT_BUILT = {PUBLISH, NOTICES, "smoke.sh", "licenses"}
+# What CI's builds of every command share, so a change to any rebuilds them
+# all (matrix): eryx-build and the toolchains (pinned in mise.toml), the
+# workflow and its actions, the smoke tests' helpers, the cache key, and
+# what the notices are made from. A directory ends in `/`.
+DRIVER_FILES = [
+    "clis/smoke.sh", "mise.toml", ".github/workflows/ci.yml",
+    ".github/actions/eryx-build/", ".github/actions/setup-binstall/",
+    "scripts/publish.py", "scripts/notices.py", "about.toml", "third_party/",
+]
 LOCK = "commands.lock"
 REPOSITORY_PREFIX = "eryx-org/commands"
 SOURCE_URL = "https://github.com/eryx-org/eryx-recipes"
@@ -86,7 +133,7 @@ CWASM_PINS = [("tools", "aqua:bytecodealliance/wasmtime")]
 # Files outside the recipe a lane's output depends on; see build_inputs.
 LANE_FILES = {"go": ["scripts/bootstrap-go-wasip3.sh"]}
 # What the notices and SBOM (scripts/notices.py) are made from, besides the
-# command's manual.toml entries, its commands.toml entry and its build inputs:
+# command's notice entries, its publish.toml and its build inputs:
 # the generator for every lane, and each lane's pinned notice tools.
 NOTICE_FILES = ["scripts/notices.py", "about.toml", "third_party/about.hbs",
                 "third_party/about-std.toml"]
@@ -110,12 +157,12 @@ class Error(Exception):
 
 
 # ---------------------------------------------------------------------------
-# commands.toml and the recipes
+# The commands and their recipes
 # ---------------------------------------------------------------------------
 
 
 def load_commands(text: str) -> dict[tuple[str, str], dict]:
-    """commands.toml's entries, by (namespace, name)."""
+    """The old commands.toml's entries, by (namespace, name)."""
     commands = {}
     for namespace, entries in tomllib.loads(text).items():
         for name, entry in entries.items():
@@ -123,26 +170,100 @@ def load_commands(text: str) -> dict[tuple[str, str], dict]:
     return commands
 
 
-def default_manifest(namespace: str, name: str) -> str:
-    if namespace == "eryx-gpl":
-        return f"clis/gpl/{name}/{name}.toml"
-    return f"clis/{name}.toml"
+def command_dir(key: tuple[str, str]) -> str:
+    namespace, name = key
+    return f"clis/gpl/{name}" if namespace == "eryx-gpl" else f"clis/{name}"
+
+
+def command_key(publish_toml: str) -> tuple[str, str] | None:
+    """The (namespace, name) whose publish.toml is at this repo path, if
+    it is one."""
+    match = COMMAND_DIR.match(publish_toml)
+    if not match:
+        return None
+    return ("eryx-gpl" if match["gpl"] else "eryx", match["name"])
+
+
+def commands(root: Path) -> dict[tuple[str, str], dict]:
+    """Every command's publish.toml, by (namespace, name). A tree from
+    before clis/<name>/ (sign.py makes source offers from old commits) has
+    them in commands.toml instead, with their manifests at clis/<name>.toml
+    (`manifest` is filled in for them)."""
+    legacy = root / LEGACY_COMMANDS
+    if legacy.is_file():
+        return {
+            key: {"manifest": f"clis/{key[1]}.toml" if key[0] == "eryx" else
+                  f"clis/gpl/{key[1]}/{key[1]}.toml", **entry}
+            for key, entry in load_commands(legacy.read_text()).items()
+        }
+    found = {}
+    for path in sorted([*root.glob(f"clis/*/{PUBLISH}"), *root.glob(f"clis/gpl/*/{PUBLISH}")]):
+        key = command_key(path.relative_to(root).as_posix())
+        if key:
+            found[key] = tomllib.loads(path.read_text())
+    return found
+
+
+def commands_at(root: Path, ref: str) -> dict[tuple[str, str], dict]:
+    """commands() as of commit `ref`, whichever layout it has."""
+    legacy = git(root, "show", f"{ref}:{LEGACY_COMMANDS}", check=False)
+    if legacy is not None:
+        return load_commands(legacy)
+    found = {}
+    for path in (git(root, "ls-tree", "-r", "--name-only", ref, "--", "clis", check=False) or "").split():
+        if key := command_key(path):
+            found[key] = tomllib.loads(git(root, "show", f"{ref}:{path}"))
+    return found
 
 
 def manifest_path(key: tuple[str, str], entry: dict) -> str:
-    return entry.get("manifest", default_manifest(*key))
+    """A command's manifest: <dir>/<name>.toml, unless its publish.toml
+    names one (`manifest`, for one fetched to where eryx keeps it)."""
+    return entry.get("manifest", f"{command_dir(key)}/{key[1]}.toml")
+
+
+def find_command(root: Path, name: str) -> tuple[tuple[str, str], dict]:
+    found = [(key, entry) for key, entry in commands(root).items() if key[1] == name]
+    if len(found) != 1:
+        raise Error(f"{name}: {len(found)} commands in clis/ have that name")
+    return found[0]
 
 
 def recipes(root: Path) -> dict[tuple[str, str], str]:
-    """Every recipe in clis/, as (namespace, name) -> repo-relative path."""
+    """Every manifest in a command's place, clis/<name>/<name>.toml or
+    clis/gpl/<name>/<name>.toml, as (namespace, name) -> repo-relative path,
+    publish.toml or not."""
     found = {}
-    paths = sorted(root.glob("clis/*.toml")) + sorted(root.glob("clis/gpl/*/*.toml"))
-    for path in paths:
+    for path in sorted([*root.glob("clis/*/*.toml"), *root.glob("clis/gpl/*/*.toml")]):
         rel = path.relative_to(root).as_posix()
-        namespace = "eryx-gpl" if rel.startswith("clis/gpl/") else "eryx"
-        name = tomllib.loads(path.read_text())["name"]
-        found[(namespace, name)] = rel
+        if path.stem != path.parent.name or rel.startswith("clis/gpl/gpl/"):
+            continue
+        found[("eryx-gpl" if rel.startswith("clis/gpl/") else "eryx", path.stem)] = rel
     return found
+
+
+def notice_components(root: Path) -> list[dict]:
+    """Every notice entry: each command's notices.toml, which go in its own
+    notices (`artifacts` is implied), then third_party/manual.toml's, which
+    list their `artifacts` or `lanes`."""
+    found = []
+    for key in commands(root):
+        path = root / command_dir(key) / NOTICES
+        if not path.is_file():
+            continue
+        for c in tomllib.loads(path.read_text()).get("component", []):
+            if "artifacts" in c or "lanes" in c:
+                raise Error(f"{path.relative_to(root)}: {c.get('name')} names its artifacts or "
+                            f"lanes, but its entries only go in {key[1]}'s notices")
+            found.append({**c, "artifacts": [key[1]]})
+    manual = root / "third_party" / "manual.toml"
+    found += tomllib.loads(manual.read_text()).get("component", []) if manual.is_file() else []
+    return found
+
+
+def lists(component: dict, name: str, lang: str) -> bool:
+    """Whether a notice entry goes in command `name`'s notices."""
+    return name in component.get("artifacts", []) or lang in component.get("lanes", [])
 
 
 def upstream_from_ref(name: str, ref: str) -> str:
@@ -175,8 +296,9 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
     is a new build, so needs a new version (check_versions).
 
     The paths are:
-    - the manifest, and every file under its own directory when it has one
-      (clis/gpl/<name>/: its patches, shims and notices);
+    - the manifest, and every file under its directory (clis/<name>/: its
+      patches and shims, and git's NOTICE.md) but what isn't built from
+      (NOT_BUILT: its publish.toml, notices and smoke test);
     - every repo path the manifest names, bare or as `{repo}/<path>` inside a
       flag (patches, shims, a WIT world), outside scratch/;
     - the files a named script reads from beside it (patch-git.sh applies
@@ -185,14 +307,16 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
     - its lane's files outside clis/ (LANE_FILES).
 
     The pins are its lane's (LANE_PINS), and the wasmtime that compiles its
-    cwasm if it has one (CWASM_PINS). A commands.toml entry adds its own
+    cwasm if it has one (CWASM_PINS). Its publish.toml adds its own
     (entry_pins).
     """
     paths = {manifest_rel}
     recipe_dir = Path(manifest_rel).parent
+    # Not a fetched manifest's: it's kept where eryx keeps it, in clis/.
     if recipe_dir != Path("clis"):
         paths.update(
-            p.relative_to(root).as_posix() for p in (root / recipe_dir).rglob("*") if p.is_file()
+            p.relative_to(root).as_posix() for p in (root / recipe_dir).rglob("*")
+            if p.is_file() and p.relative_to(root / recipe_dir).parts[0] not in NOT_BUILT
         )
     for value in strings(manifest):
         for candidate in [value, *re.findall(r"\{repo\}/(\S+)", value)]:
@@ -222,7 +346,7 @@ def build_inputs(root: Path, manifest_rel: str, manifest: dict) -> tuple[list[st
 
 
 def entry_pins(entry: dict) -> list:
-    """The pins a commands.toml entry adds to its recipe's build inputs: a
+    """The pins a publish.toml adds to its recipe's build inputs: a
     fetched recipe's (it isn't in git, so its pin stands for it), and
     `pins`, as `table.key` (a toolchain its lane doesn't otherwise use)."""
     pins = [("vars", entry["fetched"])] if "fetched" in entry else []
@@ -235,7 +359,7 @@ def entry_pins(entry: dict) -> list:
 
 
 def entry_files(root: Path, entry: dict) -> list[str]:
-    """The repo files a commands.toml entry adds to its recipe's build
+    """The repo files a publish.toml adds to its recipe's build
     inputs (`files`): ones its build uses that its recipe doesn't name, such
     as a script that writes something beside the component. Each must
     exist."""
@@ -253,12 +377,7 @@ def pin_values(mise: dict, pins: list) -> list:
 def cache_key(root: Path, name: str) -> str:
     """A hash of everything `name`'s built component dir (component, cwasm,
     manifest, provenance, notices, SBOM) depends on; see `cache-key`."""
-    commands = load_commands((root / COMMANDS).read_text())
-    keys = [key for key in recipes(root) if key[1] == name]
-    if len(keys) != 1:
-        raise Error(f"{name}: {len(keys)} recipes in clis/ have that name")
-    key = keys[0]
-    entry = commands.get(key, {})
+    key, entry = find_command(root, name)
     rel = manifest_path(key, entry)
     manifest = tomllib.loads((root / rel).read_text())
     mise = tomllib.loads((root / "mise.toml").read_text())
@@ -268,8 +387,7 @@ def cache_key(root: Path, name: str) -> str:
     # Every command's smoke test runs under wasmtime, and a cached cwasm
     # only loads under the one that compiled it.
     pins = pins + entry_pins(entry) + NOTICE_PINS[manifest["lang"]] + CWASM_PINS
-    manual = tomllib.loads((root / "third_party" / "manual.toml").read_text())
-    listed = [c for c in manual.get("component", []) if name in c.get("artifacts", [])]
+    listed = [c for c in notice_components(root) if lists(c, name, manifest["lang"])]
     paths = set(paths) | set(NOTICE_FILES) | {f for c in listed for f in c.get("files", [])}
     files = {}
     for path in sorted(paths):
@@ -306,23 +424,35 @@ def recipe_url(mise: dict, entry: dict, rel: str) -> str | None:
 
 
 def check_versions(root: Path, base: str | None) -> list[str]:
-    """Problems with commands.toml, as messages (none when it's fine)."""
+    """Problems with the commands' publish.toml, as messages (none when
+    they're fine)."""
     problems = []
-    commands = load_commands((root / COMMANDS).read_text())
-    found = recipes(root)
-    for key in sorted(found.keys() - commands.keys()):
-        problems.append(f"{key[0]}:{key[1]} ({found[key]}) has no entry in {COMMANDS}")
+    found = commands(root)
+    for key, rel in sorted(recipes(root).items()):
+        if key not in found:
+            problems.append(f"{key[0]}:{key[1]} ({rel}) has no {command_dir(key)}/{PUBLISH}")
 
-    base_commands, base_mise, changed = {}, {}, set()
+    base_commands, base_mise, changed, moved = {}, {}, set(), {}
     if base:
-        base_commands = load_commands(git(root, "show", f"{base}:{COMMANDS}", check=False) or "")
+        base_commands = commands_at(root, base)
         base_mise = tomllib.loads(git(root, "show", f"{base}:mise.toml", check=False) or "")
-        changed = set(git(root, "diff", "--name-only", f"{base}...HEAD").split())
+        changed, moved = changes(root, base)
+        merge_base = git(root, "merge-base", base, "HEAD").strip()
+    moved_from = {new: old for old, new in moved.items()}
+
+    def only_moved(path: str) -> bool:
+        """Whether `path` is its base version with only the paths in it
+        moved (same_recipe), so not a change to what's built."""
+        old_path = moved_from.get(path, path)
+        old = git(root, "show", f"{merge_base}:{old_path}", check=False)
+        new = git(root, "show", f"HEAD:{path}", check=False)
+        return old is not None and new is not None and same_recipe(old, old_path, new, path, moved)
+
     mise = tomllib.loads((root / "mise.toml").read_text())
     lock_path = root / LOCK
     locked = read_lock(lock_path.read_text() if lock_path.exists() else "")
 
-    for key, entry in sorted(commands.items()):
+    for key, entry in sorted(found.items()):
         label = f"{key[0]}:{key[1]}"
         rel = manifest_path(key, entry)
         if "fetched" in entry and entry["fetched"] not in mise.get("vars", {}):
@@ -342,6 +472,8 @@ def check_versions(root: Path, base: str | None) -> list[str]:
                 )
                 continue
         manifest = tomllib.loads((root / rel).read_text())
+        if manifest.get("name") != key[1]:
+            problems.append(f"{label}: {rel} is named {manifest.get('name')!r}, not {key[1]!r}")
         if entry.get("multicall"):
             try:
                 multicall_names(manifest)
@@ -389,7 +521,7 @@ def check_versions(root: Path, base: str | None) -> list[str]:
             continue
         touched = sorted(
             path for path in changed
-            if any(path == i or path.startswith(i + "/") for i in paths)
+            if any(path == i or path.startswith(i + "/") for i in paths) and not only_moved(path)
         )
         if pin_values(base_mise, pins) != pin_values(mise, pins):
             touched.append("mise.toml (a pinned toolchain or recipe)")
@@ -399,6 +531,164 @@ def check_versions(root: Path, base: str | None) -> list[str]:
                 f"{entry['version']} needs a new revision"
             )
     return problems
+
+
+def changes(root: Path, base: str) -> tuple[set[str], dict[str, str]]:
+    """What changed from `base` to HEAD (`base...HEAD`): the paths whose
+    content is new, changed or gone, and every rename, old -> new. A pure
+    rename (git's R100) isn't a change, so neither of its paths is in the
+    first; one with edits has both. git can't pair a small file whose edit
+    leaves it under half the same, so an added file is also taken for a
+    deleted one with the same name, when there's only one."""
+    out = git(root, "diff", "--name-status", "-z", "-M", f"{base}...HEAD") or ""
+    fields = out.split("\0")
+    changed, moved, added, deleted = set(), {}, [], []
+    i = 0
+    while i < len(fields) and fields[i]:
+        status = fields[i]
+        if status[0] in "RC":
+            old, new = fields[i + 1], fields[i + 2]
+            i += 3
+            if status[0] == "R":
+                moved[old] = new
+            if status != "R100":
+                changed.update({old, new} if status[0] == "R" else {new})
+        else:
+            changed.add(fields[i + 1])
+            {"A": added, "D": deleted}.get(status[0], []).append(fields[i + 1])
+            i += 2
+    for new in added:
+        same_name = [old for old in deleted if Path(old).name == Path(new).name]
+        if len(same_name) == 1:
+            moved[same_name[0]] = new
+    return changed, moved
+
+
+def moved_dirs(moved: dict[str, str]) -> dict[str, str]:
+    """The directories a set of renames moved whole: `a/x/f` -> `b/x/f`
+    moved `a/x` to `b/x`, unless another file under `a/x` went elsewhere."""
+    candidates: dict[str, set[str]] = {}
+    for old, new in moved.items():
+        o, n = old.split("/"), new.split("/")
+        i = 1
+        while i < min(len(o), len(n)) and o[-i] == n[-i]:
+            candidates.setdefault("/".join(o[:-i]), set()).add("/".join(n[:-i]))
+            i += 1
+    dirs = {}
+    for old_dir, new_dirs in candidates.items():
+        [new_dir] = new_dirs if len(new_dirs) == 1 else [None]
+        under = [(o, n) for o, n in moved.items() if o.startswith(old_dir + "/")]
+        # Not when something moved into it: then it's still there.
+        if new_dir and not any(n.startswith(old_dir + "/") for n in moved.values()) and all(
+            n == new_dir + o[len(old_dir):] for o, n in under
+        ):
+            dirs[old_dir] = new_dir
+    return dirs
+
+
+def rewrite_paths(text: str, moved: dict[str, str]) -> str:
+    """`text` with every repo path a rename moved (and every directory it
+    moved whole) spelled at its new place."""
+    mapping = {**moved_dirs(moved), **moved}
+    if not mapping:
+        return text
+    alternatives = "|".join(re.escape(p) for p in sorted(mapping, key=len, reverse=True))
+    pattern = rf"(?<![\w.-])(?:{alternatives})(?![\w-]|\.\w)"
+    return re.sub(pattern, lambda m: mapping[m[0]], text)
+
+
+def resolve_relative(text: str, path: str) -> str:
+    """`text`, a script at `path`, with each path it spells relative to its
+    own directory (SCRIPT_RELATIVE) written as the repo path it names, so a
+    script that moved and changed `$dir/../x` to `$dir/../../x` to keep
+    naming the same file reads the same."""
+    def repo_path(m):
+        found = os.path.normpath(Path(path).parent / m[1])
+        return m[0][:m.start(1) - m.start(0)] + "{repo}/" + Path(found).as_posix()
+    return SCRIPT_RELATIVE.sub(repo_path, text)
+
+
+def same_recipe(old_text: str, old_path: str, new_text: str, new_path: str,
+                moved: dict[str, str]) -> bool:
+    """Whether a build input at `new_path` is its base version at
+    `old_path` with nothing changed but where the files it names are: old
+    paths rewritten to where they moved (per `moved`), and paths relative to
+    a moved script adjusted to name the same files. A manifest is compared
+    as TOML data, so its comments don't count; everything else as text."""
+    old = rewrite_paths(resolve_relative(old_text, old_path), moved)
+    new = resolve_relative(new_text, new_path)
+    if new_path.endswith(".toml"):
+        try:
+            return tomllib.loads(old) == tomllib.loads(new)
+        except tomllib.TOMLDecodeError:
+            return False
+    return old == new
+
+
+def load_manifest(root: Path, key: tuple[str, str], entry: dict) -> dict:
+    """A command's manifest, or for one fetched from eryx that isn't
+    fetched here, eryx's at its pin."""
+    rel = manifest_path(key, entry)
+    if (root / rel).is_file() or "fetched" not in entry:
+        return tomllib.loads((root / rel).read_text())
+    mise = tomllib.loads((root / "mise.toml").read_text())
+    return tomllib.loads(raw_eryx(mise["vars"][entry["fetched"]], rel))
+
+
+def matrix(root: Path, base: str | None) -> dict[str, list[dict]]:
+    """The commands CI builds, by lane: every one without `base`, else those
+    whose directory or build inputs changed since `base`, or all of them
+    when DRIVER_FILES did; see `matrix`."""
+    changed = None
+    if base:
+        changed, moved = changes(root, base)
+        # A move is a change here: the build should prove the new layout.
+        changed |= set(moved) | set(moved.values())
+    lanes = {lang: [] for lang in LANE_PINS}
+    for key, entry in sorted(commands(root).items(), key=lambda item: item[0][1]):
+        manifest = load_manifest(root, key, entry)
+        if changed is not None:
+            paths, _ = build_inputs(root, manifest_path(key, entry), manifest)
+            paths = [*DRIVER_FILES, f"{command_dir(key)}/", *paths, *entry_files(root, entry)]
+            if not any(c == p or (p.endswith("/") and c.startswith(p)) or c.startswith(p + "/")
+                       for c in changed for p in paths):
+                continue
+        item = {"cli": key[1]}
+        # A lane without the WASI SDK installs it only for these (find).
+        if ("vars", "wasi_sdk_version") in entry_pins(entry):
+            item["wasi_sdk"] = True
+        lanes[manifest["lang"]].append(item)
+    return lanes
+
+
+def check_manifests(root: Path, eryx_build: Path) -> int:
+    """`eryx-build --check` over every command's manifest (see
+    `check-manifests`), and its exit status. A fetched manifest that isn't
+    fetched is left out, as it would be in clis/."""
+    with tempfile.TemporaryDirectory() as tmp:
+        shadow = Path(tmp)
+        for entry in root.iterdir():
+            if entry.name != "clis":
+                (shadow / entry.name).symlink_to(entry)
+        clis = shadow / "clis"
+        clis.mkdir()
+        # The directories manifests name files in, but none of their TOML.
+        for entry in (root / "clis").iterdir():
+            if entry.name != "gpl" and entry.suffix != ".toml":
+                (clis / entry.name).symlink_to(entry)
+        for key, entry in commands(root).items():
+            manifest = root / manifest_path(key, entry)
+            if not manifest.is_file():
+                continue
+            if key[0] == "eryx-gpl":
+                gpl = clis / "gpl" / key[1]
+                gpl.mkdir(parents=True)
+                for f in (root / command_dir(key)).iterdir():
+                    if f.suffix != ".toml" or f == manifest:
+                        (gpl / f.name).symlink_to(f)
+            else:
+                (clis / f"{key[1]}.toml").symlink_to(manifest)
+        return subprocess.run([str(eryx_build.resolve()), "--check"], cwd=shadow).returncode
 
 
 def git(root: Path, *args: str, check: bool = True) -> str | None:
@@ -551,10 +841,6 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
     signing idempotent: a re-run after a failure part way records and signs
     whatever the failed run pushed. `out` is rewritten after each command, so
     a failure still leaves what was done."""
-    commands = load_commands((ROOT / COMMANDS).read_text())
-    by_name = {}
-    for key in commands:
-        by_name.setdefault(key[1], []).append(key)
     revision = (git(ROOT, "rev-parse", "HEAD") or "").strip()
     mise = tomllib.loads((ROOT / "mise.toml").read_text())
     eryx_rev = mise["vars"]["eryx_rev"]
@@ -564,11 +850,7 @@ def publish(dirs: list[Path], registry: Registry, fail_existing: bool,
     for directory in dirs:
         provenance = json.loads((directory / "provenance.json").read_text())
         name = provenance["name"]
-        keys = by_name.get(name, [])
-        if len(keys) != 1:
-            raise Error(f"{directory}: {name!r} names {len(keys)} entries in {COMMANDS}")
-        key = keys[0]
-        entry = commands[key]
+        key, entry = find_command(ROOT, name)
         if entry.get("multicall"):
             manifest = tomllib.loads((directory / "manifest.toml").read_text())
             entry = {**entry, "names": multicall_names(manifest)}
@@ -718,19 +1000,17 @@ def replace_once(text: str, pattern: str, replacement: str, what: str) -> str:
     return new
 
 
-def set_version(text: str, key: tuple[str, str], version: str) -> str:
-    """commands.toml's text with `key`'s version replaced."""
-    table = rf'^(\[{re.escape(key[0])}\.{re.escape(key[1])}\]\n(?:(?!\[).*\n)*?)version = "[^"]*"'
-    return replace_once(text, table, rf'\g<1>version = "{version}"', f"{key[0]}:{key[1]}'s version in {COMMANDS}")
+def set_version(text: str, version: str) -> str:
+    """A publish.toml's text with its version replaced."""
+    return replace_once(text, r'^version = "[^"]*"', f'version = "{version}"', f"`version` in {PUBLISH}")
 
 
 def bump(root: Path, name: str, branch: str) -> None:
     namespace, _, short = name.partition(":")
     key = (namespace, short)
-    commands = load_commands((root / COMMANDS).read_text())
-    entry = commands.get(key)
+    entry = commands(root).get(key)
     if not entry or "fetched" not in entry:
-        raise Error(f"{name} isn't a recipe fetched from eryx in {COMMANDS}")
+        raise Error(f"{name} isn't a command whose recipe is fetched from eryx")
     var = entry["fetched"]
     mise_text = (root / "mise.toml").read_text()
     current = tomllib.loads(mise_text)["vars"][var]
@@ -751,10 +1031,11 @@ def bump(root: Path, name: str, branch: str) -> None:
 
     (root / "mise.toml").write_text(replace_once(
         mise_text, rf'^{re.escape(var)} = "[0-9a-f]+"', f'{var} = "{rev}"', f"vars.{var} in mise.toml"))
-    (root / COMMANDS).write_text(set_version((root / COMMANDS).read_text(), key, version))
+    publish_toml = root / command_dir(key) / PUBLISH
+    publish_toml.write_text(set_version(publish_toml.read_text(), version))
     print(f"{name}: {current[:12]} -> {rev[:12]}, {entry['version']} -> {version}", file=sys.stderr)
     if version.endswith("-r.1"):
-        print(f"{name}: a new upstream version: update its third_party/manual.toml entry "
+        print(f"{name}: a new upstream version: update its {command_dir(key)}/{NOTICES} entry "
               "(version, url, cli_commit) and licence file by hand", file=sys.stderr)
 
 
@@ -777,6 +1058,13 @@ def main() -> int:
     locking.add_argument("--lock", type=Path, default=ROOT / LOCK)
     keying = sub.add_parser("cache-key")
     keying.add_argument("name")
+    lanes = sub.add_parser("matrix")
+    lanes.add_argument("--base")
+    finding = sub.add_parser("manifest")
+    finding.add_argument("name")
+    sub.add_parser("list")
+    checking = sub.add_parser("check-manifests")
+    checking.add_argument("--eryx-build", type=Path, required=True)
     bumping = sub.add_parser("bump")
     bumping.add_argument("name")
     bumping.add_argument("--branch", default="multi-guest")
@@ -800,6 +1088,20 @@ def main() -> int:
         if args.command == "cache-key":
             print(cache_key(ROOT, args.name))
             return 0
+        if args.command == "matrix":
+            for lang, items in matrix(ROOT, args.base).items():
+                print(f"{lang}={json.dumps(items, separators=(',', ':'))}")
+            return 0
+        if args.command == "manifest":
+            key, entry = find_command(ROOT, args.name)
+            print(manifest_path(key, entry))
+            return 0
+        if args.command == "list":
+            for key, entry in sorted(commands(ROOT).items(), key=lambda item: item[0][1]):
+                print(f"{key[1]}\t{manifest_path(key, entry)}")
+            return 0
+        if args.command == "check-manifests":
+            return check_manifests(ROOT, args.eryx_build)
         if args.command == "bump":
             bump(ROOT, args.name, args.branch)
             return 0
