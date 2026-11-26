@@ -24,11 +24,9 @@ license = "MIT OR Apache-2.0"
 lang = "rust"
 
 [source]
-# The v10.5.2 tag's archive. Upstream publishes no checksum for it, so this
-# is the sha256 of the archive GitHub served.
-repo = "https://github.com/sharkdp/fd/archive/refs/tags/v10.5.2.tar.gz"
+repo = "https://github.com/sharkdp/fd.git"
 ref = "v10.5.2"
-sha256 = "8991b6504cac33c00528050622dfe3f2a0db1be1a6faf99f69b46d1a8f737dc5"
+commit = "b2a287b3993768e0ec52f0852916917f23fb2a38"
 # Local working copy the driver builds from; fetched on first build.
 dir = "scratch/fd"
 
