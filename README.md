@@ -7,6 +7,36 @@ Recipes for building third-party software for [eryx](https://github.com/eryx-org
 
 Both build against eryx at `mise.toml`'s `eryx_rev`.
 
+## Using them
+
+**Commands** are Wasm components at `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>` (namespace `eryx`, or `eryx-gpl` for GPL ones), and `eryx.run` is a [wkg](https://github.com/bytecodealliance/wasm-pkg-tools) registry for them. [`commands.lock`](commands.lock) lists every published version and its digest.
+
+```sh
+wkg get --registry eryx.run eryx:rg@15.1.0-r.4 -o ./rg.wasm   # or without @<version>, the newest
+wkg oci pull ghcr.io/eryx-org/commands/eryx/rg:15.1.0-r.4 -o rg.wasm
+
+# Signed by this repo's publish workflow (eryx-commands, its old name, before November 2026)
+cosign verify ghcr.io/eryx-org/commands/eryx/rg:15.1.0-r.4 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/eryx-org/eryx-(commands|recipes)/\.github/workflows/ci\.yml@refs/heads/main$'
+```
+
+eryx's book covers [running them in a sandbox](https://docs.eryx.run/latest/book/guide/precompile.html#commands-from-a-registry). Each command's notices, SBOM and (for GPL ones) source are attached to it as OCI referrers (`oras discover`); see [Signatures and referrers](#signatures-and-referrers).
+
+**Wheels** are on a pip index whose path is the ABI they're built for:
+
+```sh
+pip download --dest wheels --only-binary :all: \
+    --python-version 3.14 --implementation cp --abi cp314 \
+    --platform wasi_0_0_0_wasm32 --platform any \
+    --extra-index-url https://wheels.eryx.run/cp314-wasip2-sdk33/simple/ \
+    numpy
+```
+
+[`wheels/README.md`](wheels/README.md#using-the-wheels-elsewhere) says what they need, and eryx's book covers [using them, with pip or uv](https://docs.eryx.run/latest/book/guide/packages.html).
+
+To ask for a command or package we don't build, [open an issue](https://github.com/eryx-org/eryx-recipes/issues).
+
 ## Commands
 
 - **Recipes** (`clis/*.toml`): one per command. Each pins the upstream source and its patches, and is built by [eryx-build](https://github.com/eryx-org/eryx/tree/multi-guest/crates/eryx-build). GPL recipes live apart, in `clis/gpl/`. coreutils' recipe isn't kept here: eryx builds the same coreutils for its embedded commands, so `mise run fetch-coreutils` fetches `clis/coreutils.toml` and its uucore patch from eryx at `vars.coreutils_rev`, and `mise run bump-coreutils [-- BRANCH]` moves that pin (and the version) to the branch's newest change to them. A new upstream coreutils version also needs `third_party/manual.toml`'s uutils entry (`version`, `url`, `cli_commit`) and `third_party/licenses/coreutils-LICENSE` updated by hand; `mise run notices-check` fails until they are. check-clis and check-versions fail if the fetched copy isn't the pinned one.
