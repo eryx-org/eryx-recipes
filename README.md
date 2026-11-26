@@ -39,27 +39,50 @@ To ask for a command or package we don't build, [open an issue](https://github.c
 
 ## Commands
 
-- **Recipes** (`clis/*.toml`): one per command. Each pins the upstream source and its patches, and is built by [eryx-build](https://github.com/eryx-org/eryx/tree/multi-guest/crates/eryx-build). GPL recipes live apart, in `clis/gpl/`. coreutils' recipe isn't kept here: eryx builds the same coreutils for its embedded commands, so `mise run fetch-coreutils` fetches `clis/coreutils.toml` and its uucore patch from eryx at `vars.coreutils_rev`, and `mise run bump-coreutils [-- BRANCH]` moves that pin (and the version) to the branch's newest change to them. A new upstream coreutils version also needs `third_party/manual.toml`'s uutils entry (`version`, `url`, `cli_commit`) and `third_party/licenses/coreutils-LICENSE` updated by hand; `mise run notices-check` fails until they are. check-clis and check-versions fail if the fetched copy isn't the pinned one.
+- **Recipes** (`clis/<name>/`): one directory per command (see [below](#a-commands-directory)). Its manifest pins the upstream source and its patches, and is built by [eryx-build](https://github.com/eryx-org/eryx/tree/multi-guest/crates/eryx-build). GPL commands live apart, in `clis/gpl/<name>/`, which is what puts them in the `eryx-gpl` namespace.
 - **Registry:** `ghcr.io/eryx-org/commands/<namespace>/<name>:<upstream>-r.<n>`. That's `eryx:<name>` for permissively licensed commands and `eryx-gpl:<name>` for GPL ones. The layout and metadata follow [wkg](https://github.com/bytecodealliance/wasm-pkg-tools)'s conventions, so `wkg` can fetch them.
 - **Versions:** each published version is immutable. `<upstream>-r.<n>` is the upstream release plus our build revision, which bumps whenever the binary changes. There are no floating tags.
 - **Notices:** each command ships its third-party notices (the tool, what it links, its crates or modules) and is signed with its provenance (see [Signatures and referrers](#signatures-and-referrers)).
 
 The design and decisions are in [#1](https://github.com/eryx-org/eryx-recipes/issues/1).
 
+### A command's directory
+
+Everything that's one command's is in `clis/<name>/` (`clis/gpl/<name>/` for a GPL one). To add a command, create that directory with the files below: `<name>.toml`, `publish.toml` (a `version` ending `-r.1`), `notices.toml` and the licence texts it names, `smoke.sh`, and its patches and shims if it has any. Nothing outside it changes: CI finds it (`scripts/publish.py matrix`) and builds it in its manifest's lane. Before pushing, `mise run check-clis`, `mise run notices-check`, and `python3 scripts/publish.py check-versions --base origin/main` check it.
+
+| File | |
+|---|---|
+| `<name>.toml` | the eryx-build manifest. Paths in it are relative to the repo root (`clis/<name>/patches/...`). |
+| `publish.toml` | its published version, and how it's published (see [Publishing](#publishing)) |
+| `patches/` | its patches, and the scripts that apply them (a manifest's `vendor_patch`, or a dep's `config_patch`) |
+| `shims/` | C sources and headers its build adds (`shims`, `-include`) |
+| `licenses/` | the licence and notice texts its notice entries name, copied from the source at its pin |
+| `notices.toml` | its third-party notice entries: the tool, and each library it statically links (its `[[deps]]`), in [`third_party/manual.toml`](third_party/manual.toml)'s form, without `artifacts` (they're this command's) |
+| `smoke.sh` | its smoke test, which `clis/smoke.sh <name>` sources after setting `NAME`, `OUT` (its component dir), `WORK` (a scratch dir with `data/fruit.txt`) and the helpers `expect` and `expect_status` |
+
+Everything there but `publish.toml`, `notices.toml`, `smoke.sh` and `licenses/` is a build input. What isn't any one command's stays outside:
+
+- `clis/shared/` has the patches and shims several commands build with: curl's patch and Mbed TLS's, which curl and git's libcurl both use.
+- The Go commands go-compile, go-asm and go-link build from the same patched fork as go, with go's patches (`clis/go/patches/`).
+- `third_party/manual.toml` has the notice entries for what a lane's toolchain links (`lanes`), and `third_party/licenses/` the licence texts several commands' entries name.
+- `wit/` has the eryx WIT that commands calling `eryx:process` are built against.
+- coreutils' manifest isn't kept here: eryx builds the same coreutils for its embedded commands, so `mise run fetch-coreutils` fetches it and its uucore patch from eryx at `vars.coreutils_rev` to where eryx keeps them (`clis/coreutils.toml`, `clis/patches/patch-uucore-wasip2.sh`, both git-ignored), and `clis/coreutils/publish.toml` names it. `mise run bump-coreutils [-- BRANCH]` moves that pin (and the version) to the branch's newest change to them. A new upstream coreutils version also needs `clis/coreutils/notices.toml`'s uutils entry (`version`, `url`, `cli_commit`) and its licence file updated by hand; `mise run notices-check` fails until they are. check-clis and check-versions fail if the fetched copy isn't the pinned one.
+
 ## Building a command
 
 ```sh
 mise install                      # the pinned toolchains
-mise run build-cli -- rg          # or a path: clis/gpl/git/git.toml
+mise run build-cli -- rg          # or a manifest's path: clis/gpl/git/git.toml
 clis/smoke.sh rg                  # run it under the wasmtime CLI
 mise run check-clis               # validate every manifest
+mise run list-clis                # every command and its manifest
 ```
 
-After a build, `mise run notices -- OUTDIR rg` writes the command's third-party notices and its SPDX 2.3 SBOM, `<name>.spdx.json` (see `scripts/notices.py`), and `mise run notices-check` checks every published command's notice entries in `third_party/manual.toml`.
+eryx-build itself takes a name to mean `clis/<name>.toml`, so `build-cli` passes it the manifest's path. After a build, `mise run notices -- OUTDIR rg` writes the command's third-party notices and its SPDX 2.3 SBOM, `<name>.spdx.json` (see `scripts/notices.py`), and `mise run notices-check` checks every published command's notice entries (its `notices.toml`, and `third_party/manual.toml`'s for its lane).
 
 `build-cli` installs eryx-build from eryx-org/eryx at `mise.toml`'s `eryx_rev` into `scratch/tools` the first time. C recipes need the WASI SDK (`mise run ensure-wasi-sdk`), and gh needs the wasip3 Go fork (`scripts/bootstrap-go-wasip3.sh`). Sources and outputs go in the git-ignored `scratch/`.
 
-Go itself is four commands, built from the fork's own tree (eryx-build's `std_tool`) with `clis/patches/go-wasip3.patch`:
+Go itself is four commands, built from the fork's own tree (eryx-build's `std_tool`) with `clis/go/patches/go-wasip3.patch`:
 
 - `go` runs `go-compile`, `go-asm` and `go-link` through `eryx:process/run`, so it only builds inside eryx, registered with `allow_spawn`. Its child commands share eryx's child memory pool, which defaults to 256 MiB; linking gh needed more than 512 MiB (1 GiB worked).
 - After `mise run build-cli -- go`, `scripts/go-root.sh` writes `goroot.tar.gz` into its component dir. That's the GOROOT go needs (`go/`: the fork's standard library source and `go.env`) and a prebuilt standard library cache (`gocache/`). Mount them, and set `GOROOT` and `GOCACHE` to them.
@@ -69,15 +92,27 @@ Go itself is four commands, built from the fork's own tree (eryx-build's `std_to
 
 ## Publishing
 
-Each command's version is in `commands.toml`: `<upstream>-r.<n>`, keyed by its name (`[eryx.rg]` is `eryx:rg`).
+Each command's version is in its `publish.toml`: `<upstream>-r.<n>`. Its name is its directory's, and its namespace `eryx`, or `eryx-gpl` under `clis/gpl/`, so `clis/rg/publish.toml` is `eryx:rg`'s, published as `ghcr.io/eryx-org/commands/eryx/rg:<version>`. It has:
+
+- `version`: the upstream version, then `-r.<n>`, our build revision. Bump `n` for any change to the built component at the same upstream version (below). Go back to `r.1` when the upstream version changes. Published versions are never overwritten.
+- `upstream` (optional): the upstream version, when it can't be read from the manifest's `source.ref` once a leading `v` or `<name>-` is dropped and `_` becomes `.`.
+- `manifest` (optional): the recipe, if it isn't `<name>.toml` beside it (coreutils' fetched one).
+- `names` (optional): every name a multicall command answers to, recorded in its `run.eryx.command.names` annotation.
+- `multicall` (optional): `true` takes `names` from the manifest's cargo `--features` list instead, one tool per feature.
+- `fetched` (optional): the recipe isn't kept here but fetched from eryx-org/eryx at the commit in this mise.toml var (`mise run fetch-<name>`; `mise run bump-<name>` moves it). Moving the pin counts as a change to the command's build inputs.
+- `pins` (optional): mise.toml pins its build uses that its lane doesn't, as `<table>.<key>` (`["vars.wasi_sdk_version"]` for a Rust command that compiles C, which also has CI's Rust lane install the WASI SDK for it). They count as build inputs, like the lane's.
+- `files` (optional): repo files its build uses that its recipe doesn't name, such as a script writing something beside the component. They count as build inputs too.
+
+The rules:
 
 - **Bumping:** a PR that changes what a command is built from must bump its `r.<n>`, and a new upstream version starts at `r.1`. What it's built from is:
-  - its manifest and everything in its own directory;
-  - the patches, shims and WIT it names, and the files its patch scripts apply;
-  - its lane's pins: eryx-build, Rust, the WASI SDK, wit-bindgen or the Go fork; wasmtime, if it ships a cwasm; and any `pins` its `commands.toml` entry lists.
+  - its manifest and everything in its directory but `publish.toml`, `notices.toml`, `smoke.sh` and `licenses/`;
+  - the patches, shims and WIT it names (in `clis/shared/` or another command's directory too), and the files its patch scripts apply;
+  - its lane's pins: eryx-build, Rust, the WASI SDK, wit-bindgen or the Go fork; wasmtime, if it ships a cwasm; and any `pins` and `files` its `publish.toml` lists.
 
-  `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR. A version may never be lower than one `commands.lock` already has. Versions are `MAJOR.MINOR.PATCH-r.<n>`, as wkg needs semver.
-- **CI cache:** on pushes and PRs, CI restores a command's built component dir instead of rebuilding it when nothing it's made from changed: the inputs above, plus its `commands.toml` entry and its notices' inputs (`python3 scripts/publish.py cache-key NAME` prints the hash). It still smoke-tests it. The weekly run and manual runs, so every real publish, build everything from source.
+  `python3 scripts/publish.py check-versions --base origin/main` checks this, and CI runs it on every PR. Moving a file isn't a change, nor is changing a manifest or script only to name moved files where they now are (or a manifest's comments): it compares each with its base version with the moved paths rewritten. A version may never be lower than one `commands.lock` already has. Versions are `MAJOR.MINOR.PATCH-r.<n>`, as wkg needs semver.
+- **CI builds:** on pushes and PRs, CI builds the commands whose directory or build inputs changed, and every command when what they all share does (mise.toml, the workflow and its actions, `clis/smoke.sh`, `scripts/publish.py`, or what the notices are made from); `python3 scripts/publish.py matrix --base REF` prints what it would build. The weekly run and manual runs build every command.
+- **CI cache:** on pushes and PRs, CI restores a command's built component dir instead of rebuilding it when nothing it's made from changed: the inputs above, plus its `publish.toml` and its notices' inputs (`python3 scripts/publish.py cache-key NAME` prints the hash). It still smoke-tests it. The weekly run and manual runs, so every real publish, build everything from source.
 - **Dry run:** every CI run publishes what it built to a throwaway registry on the runner. It reads each push back, checks the layer against `component.wasm`, and uploads the would-be `commands.lock`.
 - **Real publish:** Ben runs the CI workflow by hand on `main` with `publish` set; the job only runs for that actor. After the dry run, it pushes every built command whose version isn't in the registry yet to `ghcr.io/eryx-org/commands/<namespace>/<name>:<version>`. Then it opens a PR that adds them to `commands.lock`.
   - On a private repo, a required reviewer on an environment needs a paid plan, so the actor check stands in for one until the repo is public. It also checks who triggered a re-run.
@@ -104,7 +139,7 @@ It annotates the manifest from the build's `provenance.json`:
 | `run.eryx.command.upstream` | `<repo>@<commit>`, or `<url>#sha256:<digest>` for an archive |
 | `run.eryx.command.eryx-build` | the eryx-build version and the eryx commit it was installed from (`0.15.1+<eryx_rev>`) |
 | `run.eryx.command.wit` | the WIT packages it imports, with versions (`wasi:cli@0.2.12,...`) |
-| `run.eryx.command.names` | for a multicall command, every name it answers to (`names` in `commands.toml`) |
+| `run.eryx.command.names` | for a multicall command, every name it answers to (`names` in its `publish.toml`) |
 
 `commands.lock`, in wkg.lock's format, lists every published version with its layer digest. eryx's own `commands.lock` copies its pins from it.
 
@@ -127,7 +162,7 @@ After a real publish, the sign job (`scripts/sign.py`) attaches these to each co
 | a cosign signature | keyless: a Fulcio certificate for this repo's publish workflow on `main` |
 | a SLSA v1 provenance attestation (`https://slsa.dev/provenance/v1`) | the workflow run, this repo's commit, and the upstream source and patches from `provenance.json` |
 | `application/vnd.eryx.notices.v1+markdown` | the command's third-party notices |
-| `application/spdx+json` | an SPDX 2.3 SBOM: the command (its published version, with `component.wasm`'s SHA-256), containing every package its notices list (crates with `pkg:cargo` purls, Go modules with `pkg:golang` purls, and what it links from `third_party/manual.toml`) |
+| `application/spdx+json` | an SPDX 2.3 SBOM: the command (its published version, with `component.wasm`'s SHA-256), containing every package its notices list (crates with `pkg:cargo` purls, Go modules with `pkg:golang` purls, and what it links, from its notice entries) |
 | `application/vnd.eryx.source-offer.v1+json` | GPL commands only: the complete corresponding source, next to the binary. Its layers are `<name>-recipe.tar.gz` (every build input from this repo at the published commit: the recipe, patches, shims and WIT, plus `BUILD-INPUTS.json` with the tool pins such as `eryx_rev` and the WASI SDK) and the upstream sources at their pins (the tool's own tree at its commit, and each statically linked dependency's archive). Its config lists all of them with their digests. |
 
 cosign 3 stores signatures and attestations as Sigstore bundles in referrers too; on a registry without the referrers API they're listed under the `sha256-<digest>` tag. The job skips whatever's already attached, so a re-run finishes a failed one without duplicates. It only signs a manifest (by digest) whose layer is this run's `component.wasm` and, if publish found it already there, whose revision is a commit of `main`. A version that was already in the registry with another layer (a full re-run rebuilds, and builds aren't guaranteed to be reproducible) is left unsigned and listed in the job summary; re-run only the failed jobs, which reuse the original build, or run the workflow on `main` with `sign_run_id` set to the publishing run's ID: that run builds and publishes nothing, and signs the earlier run's versions from its artifacts (they're kept 14 days, `published` 90). The dry run signs and attaches the same way, to its throwaway registry, with a key made for the run.

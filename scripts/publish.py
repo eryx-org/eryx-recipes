@@ -133,7 +133,7 @@ CWASM_PINS = [("tools", "aqua:bytecodealliance/wasmtime")]
 # Files outside the recipe a lane's output depends on; see build_inputs.
 LANE_FILES = {"go": ["scripts/bootstrap-go-wasip3.sh"]}
 # What the notices and SBOM (scripts/notices.py) are made from, besides the
-# command's manual.toml entries, its commands.toml entry and its build inputs:
+# command's notice entries, its publish.toml and its build inputs:
 # the generator for every lane, and each lane's pinned notice tools.
 NOTICE_FILES = ["scripts/notices.py", "about.toml", "third_party/about.hbs",
                 "third_party/about-std.toml"]
