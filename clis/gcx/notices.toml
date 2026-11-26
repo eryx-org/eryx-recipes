@@ -1,10 +1,10 @@
 [[component]]
 name = "Grafana CLI (gcx)"
-version = "1.9.0 (7893f846)"
+version = "1.9.1 (9e71d793)"
 license = "Apache-2.0"
-url = "https://github.com/grafana/gcx/tree/7893f846f459408daa347b8ab4d12c30324387c5"
+url = "https://github.com/grafana/gcx/tree/9e71d793a8e9b53b7d0ec605a9f41fd5493cdcce"
 # Its Go modules are listed from its vendor tree (scripts/notices.py,
 # go_section).
 files = ["clis/gcx/licenses/gcx-LICENSE"]
 cli = "clis/gcx/gcx.toml"
-cli_commit = "7893f846f459408daa347b8ab4d12c30324387c5"
+cli_commit = "9e71d793a8e9b53b7d0ec605a9f41fd5493cdcce"
