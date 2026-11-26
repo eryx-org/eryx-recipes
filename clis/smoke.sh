@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # Smoke-test a built CLI component under the wasmtime CLI, from the repo root:
 #   clis/smoke.sh <name>      (after `mise run build-cli -- <name>`)
+#   clis/smoke.sh <name> --sandbox --scratch DIR
+#                             (after `mise run build-cli -- <name> --sandbox`,
+#                             in a throwaway container: scripts/sandbox.py)
 #
 # This only proves the component runs. eryx's own tests run them inside eryx.
 set -euo pipefail
 
-NAME="${1:?Usage: clis/smoke.sh <name>}"
+NAME="${1:?Usage: clis/smoke.sh <name> [--sandbox --scratch DIR]}"
+if [ "${2:-}" = --sandbox ]; then
+    exec python3 scripts/sandbox.py smoke "$NAME" "${@:3}"
+fi
+if [ -n "${RECIPES_REQUIRE_SANDBOX:-}" ]; then
+    echo "RECIPES_REQUIRE_SANDBOX is set: smoke tests only run with --sandbox" >&2
+    exit 1
+fi
 OUT="scratch/$NAME-component"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

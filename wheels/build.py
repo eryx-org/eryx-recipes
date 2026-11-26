@@ -17,10 +17,11 @@ public at https://wheels.eryx.run) and lists them in its index.json, which
 eryx-run's builders read (its src/builder/native.rs), and in a PEP 503 simple index per
 ABI for pip (with the aws CLI and its usual AWS_* credentials).
 
-`--sandbox` runs a build or verify in a throwaway Docker container that has
-only the recipes, the toolchain and the output mounted, and none of this
-machine's environment, as an sdist's build code may not be trustworthy (the
-agent in wheels-agent.yml always uses it).
+`--sandbox` runs a build or verify in a throwaway Docker container
+(scripts/sandbox.py, which the commands' builds share) that has only the
+recipes, the toolchain and the output mounted, and none of this machine's
+environment, as an sdist's build code may not be trustworthy (the agent in
+wheels-agent.yml always uses it).
 
 Needs Python 3.12+ (tarfile's `filter`) and uv; the wheel is built with a Python 3.14
 that uv provides.
@@ -29,6 +30,7 @@ that uv provides.
 import argparse
 import hashlib
 import html
+import importlib.util
 import json
 import os
 import re
@@ -70,9 +72,13 @@ BUCKET = "eryx-wheels"
 INDEX_URL = "https://wheels.eryx.run/index.json"
 ENDPOINT = "https://944ab6808cfb80c606e4873f8e6c2344.r2.cloudflarestorage.com"
 
-# What a sandboxed build runs in; recipes that need more (e.g. rustup)
-# install it in their build.sh
-SANDBOX_IMAGE = "ubuntu:26.04"
+# The sandbox (scripts/sandbox.py), by path: it's mounted in the container
+# too, where this runs again
+_spec = importlib.util.spec_from_file_location("sandbox", REPO / "scripts/sandbox.py")
+sandbox = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(sandbox)
+# What a sandboxed build installs in sandbox.IMAGE; recipes that need more
+# (e.g. rustup) install it in their build.sh
 SANDBOX_PACKAGES = "python3 patch ca-certificates curl build-essential"
 
 
@@ -201,40 +207,12 @@ def fetch(spec, work):
 def unpack(args):
     """Unpack a recipe's sdist into OUT/src to read, without building it"""
     _, spec = load(args.recipe)
-    out = scratch(args.out) if strict() else outside_repo(args.out)
+    out = sandbox.scratch(args.out) if sandbox.strict() else sandbox.outside_repo(args.out)
     if out.exists():
         sys.exit(f"{out} exists: unpack makes a new directory, so nothing is overwritten")
     out.mkdir(parents=True)
     top, _ = fetch(spec, out)
     print(f"Unpacked {spec['sdist']} into {top}")
-
-
-def outside_repo(path):
-    """`path`, resolved, if it and this checkout don't overlap: what an
-    sdist's files or build code can write to mustn't be able to reach
-    build.py or anything else here"""
-    path = Path(path).resolve()
-    if path == REPO or REPO in path.parents or path in REPO.parents:
-        sys.exit(f"{path} overlaps {REPO}: choose a directory outside it, such as /tmp/wheels")
-    return path
-
-
-def strict():
-    """Whether this is the agent (wheels-agent.yml), whose arguments may come
-    from a hostile package: build and verify only run in the sandbox, and
-    only with the paths `scratch` allows mounted"""
-    return bool(os.environ.get("WHEELS_REQUIRE_SANDBOX"))
-
-
-def scratch(path):
-    """`path` if it's a new directory directly in /tmp: for the agent, the
-    only host directories the sandbox may mount read-write (or `unpack` write
-    to), so the package's code can't reach the checkout, the agent's own
-    files, the Docker socket or anything else on the host"""
-    path = Path(path).resolve()
-    if path.parent != Path("/tmp").resolve() or path.exists():
-        sys.exit(f"{path} must be a new directory directly in /tmp, such as /tmp/wheels-1")
-    return path
 
 
 def build(args):
@@ -458,19 +436,20 @@ def sandboxed(args):
     recipe = Path(args.recipe).resolve()
     if RECIPES not in recipe.parents:
         sys.exit(f"{recipe} isn't a recipe in {RECIPES}")
-    mounts = [(RECIPES, "ro"), (sdk, "ro"), (uv.parent, "ro")]
+    # build.py needs the sandbox module in there too
+    mounts = [(RECIPES, "ro"), (Path(sandbox.__file__), "ro"), (sdk, "ro"), (uv.parent, "ro")]
     if args.run is build:
         # Mounted read-write, where the sdist's build code runs
         sysroot = Path(args.sysroot).resolve()
-        if strict() and sysroot != Path(os.environ["SYSROOT"]).resolve():
+        if sandbox.strict() and sysroot != Path(os.environ["SYSROOT"]).resolve():
             sys.exit(f"--sysroot must be $SYSROOT ({os.environ['SYSROOT']})")
-        out = scratch(args.out) if strict() else outside_repo(args.out)
+        out = sandbox.scratch(args.out) if sandbox.strict() else sandbox.outside_repo(args.out)
         out.mkdir(parents=True, exist_ok=True)
         mounts += [(sysroot, "ro"), (out, "rw")]
         inner = ["build", recipe, "--sysroot", sysroot, "--out", out]
     else:
         wheel, precompile = Path(args.wheel).resolve(), Path(args.precompile).resolve()
-        if strict():
+        if sandbox.strict():
             # A wheel a build left in a scratch directory, and the toolchain's
             # eryx-precompile: nothing else of the host's is mounted. The
             # build's code wrote that directory, so no symlinks: they'd have
@@ -489,31 +468,14 @@ def sandboxed(args):
             mounts.append((wheel.parent / "deps", "ro"))
         inner = ["verify", wheel, recipe, "--precompile", precompile]
 
-    command = ["docker", "run", "--rm", "--init", "--workdir", "/tmp",
-               "--env", f"WASI_SDK_PATH={sdk}",
-               "--env", f"PATH={uv.parent}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
-    for path, mode in mounts:
-        command += ["--volume", f"{path}:{path}:{mode}"]
-    setup = (f"apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "
-             f"--no-install-recommends {SANDBOX_PACKAGES} > /dev/null")
-    script = f"{setup} && exec python3 {RECIPES}/build.py {shlex.join(map(str, inner))}"
+    env = {"WASI_SDK_PATH": sdk, "PATH": f"{uv.parent}:{sandbox.SYSTEM_PATH}"}
     try:
-        run(*command, SANDBOX_IMAGE, "bash", "-c", script)
+        sandbox.run([(path, path, mode == "rw") for path, mode in mounts], env,
+                    f"exec python3 {RECIPES}/build.py {shlex.join(map(str, inner))}",
+                    SANDBOX_PACKAGES)
     finally:
         if args.run is build:
-            unlink_links(out)
-
-
-def unlink_links(directory):
-    """Delete the symlinks in `directory`: the build's code wrote it, and a
-    link (to /proc/self/environ, say) would have whatever reads it next, on
-    the host, read where it points instead"""
-    for root, dirs, files in os.walk(directory):
-        for name in dirs + files:
-            path = Path(root) / name
-            if path.is_symlink():
-                print(f"Removing the link {path} the build left", flush=True)
-                path.unlink()
+            sandbox.unlink_links(out)
 
 
 def main():
@@ -552,9 +514,8 @@ def main():
     args = parser.parse_args()
     # Set for the agent (wheels-agent.yml), which may only build and verify
     # in the sandbox: it can run build.py but can't change its environment
-    if os.environ.get("WHEELS_REQUIRE_SANDBOX") and args.run in (build, verify) \
-            and not args.sandbox:
-        sys.exit("WHEELS_REQUIRE_SANDBOX is set: build and verify only run with --sandbox")
+    if sandbox.strict() and args.run in (build, verify) and not args.sandbox:
+        sys.exit(f"{sandbox.STRICT} is set: build and verify only run with --sandbox")
     if getattr(args, "sandbox", False):
         sandboxed(args)
     else:
