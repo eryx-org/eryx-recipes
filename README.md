@@ -116,7 +116,7 @@ eryx = { registry = "eryx", metadata = { preferredProtocol = "oci", oci = { regi
 eryx-gpl = { registry = "eryx", metadata = { preferredProtocol = "oci", oci = { registry = "ghcr.io", namespacePrefix = "eryx-org/commands/" } } }
 ```
 
-Then run `wkg get eryx:sd@1.1.0-r.1`. The packages are private for now, so wkg needs credentials, such as `docker login ghcr.io`.
+Then run `wkg get eryx:sd@1.1.0-r.1`. The packages are public, so wkg needs no credentials.
 
 ## Signatures and referrers
 
