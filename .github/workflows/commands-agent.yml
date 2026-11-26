@@ -100,6 +100,8 @@ jobs:
       - name: Write the recipe
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Dollars one run may spend; the CLI stops after the turn that passes it
+          BUDGET: "20"
           RECIPES_REQUIRE_SANDBOX: "1"
           NAME: ${{ steps.issue.outputs.name }}
         run: |
@@ -165,13 +167,14 @@ jobs:
           leave there.
           EOF
           )
+          status=0
           "$RUNNER_TEMP/claude/node_modules/.bin/claude" -p "$prompt" \
-            --model claude-opus-5-5 --max-turns 400 \
+            --model claude-opus-5-5 --max-turns 400 --max-budget-usd "$BUDGET" \
+            --output-format json \
             --setting-sources project --strict-mcp-config --permission-mode dontAsk \
             --allowedTools "Read(./**)" "Read(//tmp/**)" "Glob(./**)" "Glob(//tmp/**)" \
               "Grep(./**)" "Grep(//tmp/**)" \
-              "Edit(clis/$NAME/**)" "Write(clis/$NAME/**)" \
-              "Edit(clis/gpl/$NAME/**)" "Write(clis/gpl/$NAME/**)" \
+              "Edit(clis/$NAME/**)" "Edit(clis/gpl/$NAME/**)" \
               "Bash(python3 scripts/sandbox.py build-cli $NAME --scratch:*)" \
               "Bash(python3 scripts/sandbox.py smoke $NAME --scratch:*)" \
               "Bash(python3 scripts/publish.py check-manifests --eryx-build scratch/tools/bin/eryx-build)" \
@@ -180,7 +183,13 @@ jobs:
               "WebFetch(domain:crates.io)" "WebFetch(domain:static.crates.io)" \
               "WebFetch(domain:docs.rs)" \
               "WebFetch(domain:pkg.go.dev)" "WebFetch(domain:proxy.golang.org)" \
-            --disallowedTools "Read(//proc/**)" "Glob(//proc/**)" "Grep(//proc/**)"
+            --disallowedTools "Read(//proc/**)" "Grep(//proc/**)" \
+            > "$RUNNER_TEMP/claude.json" || status=$?
+          # What it cost (.github/claude/report.py), then the CLI's own status,
+          # so running out of turns or budget fails the job and the failed job
+          # says so
+          python3 -I .github/claude/report.py "$RUNNER_TEMP/claude.json"
+          exit "$status"
 
       # Under clis/, whichever it wrote, so the PR job can tell which
       - name: Collect what it wrote
