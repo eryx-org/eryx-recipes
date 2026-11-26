@@ -582,6 +582,22 @@ jobs:
   # Ben's run by someone else. It only holds while sd2k is the only one with
   # write access, since anyone who can push can change this workflow. Move
   # this to an environment with reviewers once the repo is public.
+  # The one check to require: the build lanes' names come from their matrix,
+  # and GitHub counts a skipped required check as passing (the dry run is
+  # skipped when a lane fails), so this fails for any failed or cancelled
+  # job instead, and passes when lanes were skipped for having no changes
+  result:
+    name: CI result
+    needs: [changes, check, rust, c, go, publish-dry-run]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::A CI job failed or was cancelled"
+          exit 1
+      - run: echo "CI OK"
+
   publish:
     name: Publish to ghcr.io
     needs: publish-dry-run

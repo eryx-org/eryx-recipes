@@ -16,13 +16,10 @@ on:
       - '.github/actions/wheels-toolchain/**'
       - '.github/workflows/wheels.yml'
       - 'mise.toml'
-  # Any base, so stacked PRs build their recipes too
+  # Every PR, for the required Wheels result check (the changes job decides
+  # whether there's anything to build), on any base, so stacked PRs build
+  # their recipes too
   pull_request:
-    paths:
-      - 'wheels/**'
-      - '.github/actions/wheels-toolchain/**'
-      - '.github/workflows/wheels.yml'
-      - 'mise.toml'
   # For the wheels agent's branches, which GITHUB_TOKEN pushes and so
   # trigger nothing: wheels-agent.yml runs this on them, and the checks show
   # on the PR. Only pushes to main publish
@@ -44,7 +41,31 @@ env:
   PYTHONSAFEPATH: "1"
 
 jobs:
+  # Whether a PR touches what wheels build from; pushes to main (already
+  # filtered by paths) and dispatched runs (the agent's branches) always look
+  changes:
+    name: Wheels changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      wheels: ${{ (github.event_name != 'pull_request' || steps.filter.outputs.wheels == 'true') && 'true' || 'false' }}
+    steps:
+      # PRs' changed files come from the API, so no checkout
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            wheels:
+              - 'wheels/**'
+              - '.github/actions/wheels-toolchain/**'
+              - '.github/workflows/wheels.yml'
+              - 'mise.toml'
+
   recipes:
+    needs: changes
+    if: needs.changes.outputs.wheels == 'true'
     runs-on: ubuntu-latest
     outputs:
       recipes: ${{ steps.list.outputs.recipes }}
@@ -164,3 +185,18 @@ jobs:
             exit 0
           fi
           python3 wheels/build.py publish "${wheels[@]}"
+
+  # The one check to require: GitHub counts a skipped required check as
+  # passing, so this fails for any failed or cancelled job instead, and
+  # passes when there was nothing to build
+  result:
+    name: Wheels result
+    needs: [changes, recipes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::A wheels job failed or was cancelled"
+          exit 1
+      - run: echo "Wheels OK"
