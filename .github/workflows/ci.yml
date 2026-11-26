@@ -3,7 +3,7 @@
 #
 # Which lanes run when:
 # - Rust (rg, sd, jaq, sed, find, diffutils, and coreutils from eryx's
-#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gh, and go with its
+#   recipe), C (sqlite3, curl, jq, awk, git) and Go (gcx, gh, and go with its
 #   tools go-compile, go-asm and go-link): when the build pins
 #   (mise.toml), this workflow, smoke.sh, what the notices are made from, or
 #   one of the lane's manifests, patches, shims or WIT change.
@@ -158,6 +158,8 @@ jobs:
               - 'wit/**'
             go:
               - *driver
+              - 'clis/gcx.toml'
+              - 'clis/patches/patch-gcx-vendor.sh'
               - 'clis/gh.toml'
               - 'clis/patches/patch-gh-vendor.sh'
               - 'clis/patches/gh-*.patch'
@@ -404,7 +406,7 @@ jobs:
       matrix:
         # go, go-compile, go-asm and go-link each build from their own
         # checkout of the fork (eryx-build's std_tool).
-        cli: [gh, go, go-compile, go-asm, go-link]
+        cli: [gcx, gh, go, go-compile, go-asm, go-link]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
