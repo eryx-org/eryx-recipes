@@ -33,7 +33,7 @@ version = "0.9.3"
 
 # Publishes the commands to the registry in wkg's layout (#5).
 [tools."cargo:wkg"]
-version = "0.16.2"
+version = "0.16.3"
 
 # Signs the published commands and attaches their provenance (#6), and
 # attaches their notices and source offers as OCI referrers.
